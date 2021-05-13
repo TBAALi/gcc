@@ -1,7 +1,7 @@
 # configure.ac for GCC
 # Process this file with autoconf to generate a configuration script.
 
-# Copyright (C) 1997-2020 Free Software Foundation, Inc.
+# Copyright (C) 1997-2021 Free Software Foundation, Inc.
 
 #This file is part of GCC.
 
@@ -1139,6 +1139,11 @@ else
     [Define this to enable support for offloading.])
 fi
 
+if test "x$enable_offload_defaulted" = xyes; then
+  AC_DEFINE(OFFLOAD_DEFAULTED, 1,
+    [Define to 1 to if -foffload is defaulted])
+fi
+
 AC_ARG_WITH(multilib-list,
 [AS_HELP_STRING([--with-multilib-list], [select multilibs (AArch64, SH and x86-64 only)])],
 :,
@@ -1252,7 +1257,7 @@ AC_HEADER_SYS_WAIT
 AC_HEADER_TIOCGWINSZ
 AC_CHECK_HEADERS(limits.h stddef.h string.h strings.h stdlib.h time.h iconv.h \
 		 fcntl.h ftw.h unistd.h sys/file.h sys/time.h sys/mman.h \
-		 sys/resource.h sys/param.h sys/times.h sys/stat.h \
+		 sys/resource.h sys/param.h sys/times.h sys/stat.h sys/locking.h \
 		 direct.h malloc.h langinfo.h ldfcn.h locale.h wchar.h)
 
 # Check for thread headers.
@@ -1332,6 +1337,15 @@ AC_SEARCH_LIBS(kstat_open, kstat)
 EXTRA_GCC_LIBS="$LIBS"
 LIBS="$save_LIBS"
 AC_SUBST(EXTRA_GCC_LIBS)
+
+# Solaris needs libsocket and libnsl for socket functions before 11.4.
+# C++ needs those for libcody.
+save_LIBS="$LIBS"
+LIBS=
+AX_LIB_SOCKET_NSL
+NETLIBS="$LIBS"
+LIBS="$save_LIBS"
+AC_SUBST(NETLIBS)
 
 # Some systems put ldexp and frexp in libm instead of libc; assume
 # they're both in the same place.  jcf-dump needs them.
@@ -1695,6 +1709,19 @@ connect (fd, (sockaddr *)&in6, sizeof (in6));]])],
 if test $ac_cv_af_inet6 = yes; then
   AC_DEFINE(HAVE_AF_INET6, 1,
   [Define if AF_INET6 supported.])
+fi
+
+# Check if _LK_LOCK is supported by _locking
+AC_CACHE_CHECK(for _LK_LOCK, ac_cv_lk_lock, [
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+#include <io.h>
+#include <sys/locking.h>]], [[
+  int fd;
+  return _locking (fd, _LK_LOCK, 0);]])],
+[ac_cv_lk_lock=yes],[ac_cv_lk_lock=no])])
+if test $ac_cv_lk_lock = yes; then
+  AC_DEFINE(HOST_HAS_LK_LOCK, 1,
+  [Define if _LK_LOC supported by _locking.])
 fi
 
 # Restore CFLAGS, CXXFLAGS from before the gcc_AC_NEED_DECLARATIONS tests.
@@ -5407,8 +5434,12 @@ if test x"$insn" != x; then
 
  gcc_GAS_CHECK_FEATURE([--gdwarf-5 option],
   gcc_cv_as_gdwarf_5_flag,
-  [elf,2,36,0], [--gdwarf-5], [$insn],,
-  [AC_DEFINE(HAVE_AS_GDWARF_5_DEBUG_FLAG, 1,
+  [elf,2,36,0], [--gdwarf-5], [$insn],
+  [if test x$gcc_cv_readelf != x \
+      && $gcc_cv_readelf -wi conftest.o 2>&1 \
+	 | grep DW_TAG_compile_unit > /dev/null 2>&1; then
+     gcc_cv_as_gdwarf_5_flag=yes;
+   fi],[AC_DEFINE(HAVE_AS_GDWARF_5_DEBUG_FLAG, 1,
 [Define if your assembler supports the --gdwarf-5 option.])])
 
  dwarf4_debug_info_size=0x46
@@ -6176,6 +6207,31 @@ if test x"$ld64_flag" = x"yes"; then
   AC_DEFINE_UNQUOTED(LD64_HAS_EXPORT_DYNAMIC, $gcc_cv_ld64_export_dynamic,
   [Define to 1 if ld64 supports '-export_dynamic'.])
 fi
+
+case $target_os in
+  win32 | pe | cygwin* | mingw32*)
+    AC_MSG_CHECKING(broken PE linker dwarf5 support)
+    gcc_cv_ld_broken_pe_dwarf5=yes
+    if test $in_tree_ld = yes ; then
+      if grep -q '\.debug_loclists.*BLOCK.*__section_alignment__.*NOLOAD.*:' \
+	   $gcc_cv_ld_gld_srcdir/scripttempl/pe*.sc \
+	 && grep -q '\.debug_rnglists.*BLOCK.*__section_alignment__.*NOLOAD.*:' \
+	      $gcc_cv_ld_gld_srcdir/scripttempl/pe*.sc; then
+	gcc_cv_ld_broken_pe_dwarf5=no
+      fi
+    else
+      if $gcc_cv_ld --verbose 2>&1 | grep -q '\.debug_loclists.*BLOCK.*__section_alignment__.*NOLOAD.*:' \
+	 && $gcc_cv_ld --verbose 2>&1 | grep -q '\.debug_rnglists.*BLOCK.*__section_alignment__.*NOLOAD.*:'; then
+	gcc_cv_ld_broken_pe_dwarf5=no
+      fi
+    fi
+    if test x$gcc_cv_ld_broken_pe_dwarf5 = xyes; then
+      AC_DEFINE(HAVE_LD_BROKEN_PE_DWARF5, 1,
+	        [Define if the PE linker has broken DWARF 5 support.])
+    fi
+    AC_MSG_RESULT($gcc_cv_ld_broken_pe_dwarf5)
+    ;;
+esac
 
 # --------
 # UNSORTED
@@ -6966,7 +7022,12 @@ changequote([,])dnl
 	$ok || continue
 
 	all_lang_configurefrags="$all_lang_configurefrags \$(srcdir)/$gcc_subdir/config-lang.in"
-	all_lang_makefrags="$all_lang_makefrags \$(srcdir)/$gcc_subdir/Make-lang.in"
+	if test "x$language" = xc && test -n "$all_lang_makefrags"; then
+	    # Put c/Make-lang.in fragment first to match serialization languages order.
+	    all_lang_makefrags="\$(srcdir)/$gcc_subdir/Make-lang.in $all_lang_makefrags"
+	else
+	    all_lang_makefrags="$all_lang_makefrags \$(srcdir)/$gcc_subdir/Make-lang.in"
+	fi
 	if test -f $srcdir/$gcc_subdir/lang.opt; then
 	    lang_opt_files="$lang_opt_files $srcdir/$gcc_subdir/lang.opt"
 	    all_opt_files="$all_opt_files $srcdir/$gcc_subdir/lang.opt"

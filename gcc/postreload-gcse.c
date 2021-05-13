@@ -1,5 +1,5 @@
 /* Post reload partially redundant load elimination
-   Copyright (C) 2004-2020 Free Software Foundation, Inc.
+   Copyright (C) 2004-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -549,7 +549,6 @@ oprs_unchanged_p (rtx x, rtx_insn *insn, bool after_insn)
 	return oprs_unchanged_p (XEXP (x, 0), insn, after_insn);
 
     case PC:
-    case CC0: /*FIXME*/
     case CONST:
     CASE_CONST_ANY:
     case SYMBOL_REF:

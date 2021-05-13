@@ -1,6 +1,6 @@
 # Pretty-printers for libstdc++.
 
-# Copyright (C) 2008-2020 Free Software Foundation, Inc.
+# Copyright (C) 2008-2021 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -85,8 +85,8 @@ except ImportError:
 def find_type(orig, name):
     typ = orig.strip_typedefs()
     while True:
-        # Strip cv-qualifiers.  PR 67440.
-        search = '%s::%s' % (typ.unqualified(), name)
+        # Use Type.tag to ignore cv-qualifiers.  PR 67440.
+        search = '%s::%s' % (typ.tag, name)
         try:
             return gdb.lookup_type(search)
         except RuntimeError:

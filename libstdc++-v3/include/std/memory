@@ -1,6 +1,6 @@
 // <memory> -*- C++ -*-
 
-// Copyright (C) 2001-2020 Free Software Foundation, Inc.
+// Copyright (C) 2001-2021 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -128,7 +128,7 @@ undeclare_no_pointers(char*, size_t) { }
 /// The type of pointer safety supported by the implementation.
 inline pointer_safety
 get_pointer_safety() noexcept { return pointer_safety::relaxed; }
-// @}
+/// @}
 
 _GLIBCXX_END_NAMESPACE_VERSION
 } // namespace

@@ -1,5 +1,5 @@
 /* Partial redundancy elimination / Hoisting for RTL.
-   Copyright (C) 1997-2020 Free Software Foundation, Inc.
+   Copyright (C) 1997-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -926,7 +926,6 @@ oprs_unchanged_p (const_rtx x, const rtx_insn *insn, int avail_p)
       return 0;
 
     case PC:
-    case CC0: /*FIXME*/
     case CONST:
     CASE_CONST_ANY:
     case SYMBOL_REF:
@@ -2031,33 +2030,15 @@ insert_insn_end_basic_block (struct gcse_expr *expr, basic_block bb)
   while (NEXT_INSN (pat_end) != NULL_RTX)
     pat_end = NEXT_INSN (pat_end);
 
-  /* If the last insn is a jump, insert EXPR in front [taking care to
-     handle cc0, etc. properly].  Similarly we need to care trapping
-     instructions in presence of non-call exceptions.  */
+  /* If the last insn is a jump, insert EXPR in front.  Similarly we need to
+     take care of trapping instructions in presence of non-call exceptions.  */
 
   if (JUMP_P (insn)
       || (NONJUMP_INSN_P (insn)
 	  && (!single_succ_p (bb)
 	      || single_succ_edge (bb)->flags & EDGE_ABNORMAL)))
     {
-      /* FIXME: 'twould be nice to call prev_cc0_setter here but it aborts
-	 if cc0 isn't set.  */
-      if (HAVE_cc0)
-	{
-	  rtx note = find_reg_note (insn, REG_CC_SETTER, NULL_RTX);
-	  if (note)
-	    insn = safe_as_a <rtx_insn *> (XEXP (note, 0));
-	  else
-	    {
-	      rtx_insn *maybe_cc0_setter = prev_nonnote_insn (insn);
-	      if (maybe_cc0_setter
-		  && INSN_P (maybe_cc0_setter)
-		  && sets_cc0_p (PATTERN (maybe_cc0_setter)))
-		insn = maybe_cc0_setter;
-	    }
-	}
-
-      /* FIXME: What if something in cc0/jump uses value set in new insn?  */
+      /* FIXME: What if something in jump uses value set in new insn?  */
       new_insn = emit_insn_before_noloc (pat, insn, bb);
     }
 
@@ -3982,9 +3963,9 @@ update_ld_motion_stores (struct gcse_expr * expr)
 bool
 gcse_or_cprop_is_too_expensive (const char *pass)
 {
-  int memory_request = (n_basic_blocks_for_fn (cfun)
-			* SBITMAP_SET_SIZE (max_reg_num ())
-			* sizeof (SBITMAP_ELT_TYPE));
+  unsigned HOST_WIDE_INT memory_request
+    = ((unsigned HOST_WIDE_INT)n_basic_blocks_for_fn (cfun)
+       * SBITMAP_SET_SIZE (max_reg_num ()) * sizeof (SBITMAP_ELT_TYPE));
   
   /* Trying to perform global optimizations on flow graphs which have
      a high connectivity will take a long time and is unlikely to be
@@ -4007,13 +3988,13 @@ gcse_or_cprop_is_too_expensive (const char *pass)
 
   /* If allocating memory for the dataflow bitmaps would take up too much
      storage it's better just to disable the optimization.  */
-  if (memory_request > param_max_gcse_memory)
+  if (memory_request / 1024 > (unsigned HOST_WIDE_INT)param_max_gcse_memory)
     {
       warning (OPT_Wdisabled_optimization,
 	       "%s: %d basic blocks and %d registers; "
-	       "increase %<--param max-gcse-memory%> above %d",
+	       "increase %<--param max-gcse-memory%> above %wu",
 	       pass, n_basic_blocks_for_fn (cfun), max_reg_num (),
-	       memory_request);
+	       memory_request / 1024);
 
       return true;
     }

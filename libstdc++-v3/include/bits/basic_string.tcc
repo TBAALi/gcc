@@ -1,6 +1,6 @@
 // Components for manipulating sequences of characters -*- C++ -*-
 
-// Copyright (C) 1997-2020 Free Software Foundation, Inc.
+// Copyright (C) 1997-2021 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -58,7 +58,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     basic_string<_CharT, _Traits, _Alloc>::
     swap(basic_string& __s) _GLIBCXX_NOEXCEPT
     {
-      if (this == &__s)
+      if (this == std::__addressof(__s))
 	return;
 
       _Alloc_traits::_S_on_swap(_M_get_allocator(), __s._M_get_allocator());
@@ -254,7 +254,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     basic_string<_CharT, _Traits, _Alloc>::
     _M_assign(const basic_string& __str)
     {
-      if (this != &__str)
+      if (this != std::__addressof(__str))
 	{
 	  const size_type __rsize = __str.length();
 	  const size_type __capacity = capacity();
@@ -478,7 +478,12 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 		  if (__s + __len2 <= __p + __len1)
 		    this->_S_move(__p, __s, __len2);
 		  else if (__s >= __p + __len1)
-		    this->_S_copy(__p, __s + __len2 - __len1, __len2);
+		    {
+		      // Hint to middle end that __p and __s overlap
+		      // (PR 98465).
+		      const size_type __poff = (__s - __p) + (__len2 - __len1);
+		      this->_S_copy(__p, __p + __poff, __len2);
+		    }
 		  else
 		    {
 		      const size_type __nleft = (__p + __len1) - __s;

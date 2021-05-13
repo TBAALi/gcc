@@ -1,6 +1,6 @@
 // Components for manipulating sequences of characters -*- C++ -*-
 
-// Copyright (C) 1997-2020 Free Software Foundation, Inc.
+// Copyright (C) 1997-2021 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -48,10 +48,17 @@
 # include <string_view>
 #endif
 
-
 namespace std _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
+
+#if __cplusplus == 201703L
+// Support P0426R1 changes to char_traits in C++17.
+# define __cpp_lib_constexpr_string 201611L
+#elif __cplusplus > 201703L
+// Also support P1032R1 in C++20 (but not P0980R1 yet).
+# define __cpp_lib_constexpr_string 201811L
+#endif
 
 #if _GLIBCXX_USE_CXX11_ABI
 _GLIBCXX_BEGIN_NAMESPACE_CXX11
@@ -524,7 +531,12 @@ _GLIBCXX_BEGIN_NAMESPACE_CXX11
 #endif
       basic_string(const _CharT* __s, const _Alloc& __a = _Alloc())
       : _M_dataplus(_M_local_data(), __a)
-      { _M_construct(__s, __s ? __s + traits_type::length(__s) : __s+npos); }
+      {
+	const _CharT* __end = __s ? __s + traits_type::length(__s)
+	  // We just need a non-null pointer here to get an exception:
+	  : reinterpret_cast<const _CharT*>(__alignof__(_CharT));
+	_M_construct(__s, __end, random_access_iterator_tag());
+      }
 
       /**
        *  @brief  Construct string as multiple characters.
@@ -3073,6 +3085,20 @@ _GLIBCXX_BEGIN_NAMESPACE_CXX11
       { return __sv_type(this->data(), this->size()).ends_with(__x); }
 #endif // C++20
 
+#if __cplusplus > 202002L
+      bool
+      contains(basic_string_view<_CharT, _Traits> __x) const noexcept
+      { return __sv_type(this->data(), this->size()).contains(__x); }
+
+      bool
+      contains(_CharT __x) const noexcept
+      { return __sv_type(this->data(), this->size()).contains(__x); }
+
+      bool
+      contains(const _CharT* __x) const noexcept
+      { return __sv_type(this->data(), this->size()).contains(__x); }
+#endif // C++23
+
       // Allow basic_stringbuf::__xfer_bufptrs to call _M_length:
       template<typename, typename, typename> friend class basic_stringbuf;
     };
@@ -4693,10 +4719,9 @@ _GLIBCXX_END_NAMESPACE_CXX11
 
       /**
        *  @brief  Insert a string_view.
-       *  @param __pos  Position in string to insert at.
-       *  @param __svt  The object convertible to string_view to insert from.
-       *  @param __pos  Position in string_view to insert
-       *  from.
+       *  @param __pos1  Position in string to insert at.
+       *  @param __svt   The object convertible to string_view to insert from.
+       *  @param __pos2  Position in string_view to insert from.
        *  @param __n    The number of characters to insert.
        *  @return  Reference to this string.
       */
@@ -5997,6 +6022,21 @@ _GLIBCXX_END_NAMESPACE_CXX11
       ends_with(const _CharT* __x) const noexcept
       { return __sv_type(this->data(), this->size()).ends_with(__x); }
 #endif // C++20
+
+#if __cplusplus >= 202011L \
+  || (__cplusplus == 202002L && !defined __STRICT_ANSI__)
+      bool
+      contains(basic_string_view<_CharT, _Traits> __x) const noexcept
+      { return __sv_type(this->data(), this->size()).contains(__x); }
+
+      bool
+      contains(_CharT __x) const noexcept
+      { return __sv_type(this->data(), this->size()).contains(__x); }
+
+      bool
+      contains(const _CharT* __x) const noexcept
+      { return __sv_type(this->data(), this->size()).contains(__x); }
+#endif // C++23
 
 # ifdef _GLIBCXX_TM_TS_INTERNAL
       friend void

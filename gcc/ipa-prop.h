@@ -1,5 +1,5 @@
 /* Interprocedural analyses.
-   Copyright (C) 2005-2020 Free Software Foundation, Inc.
+   Copyright (C) 2005-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -1016,16 +1016,6 @@ public:
 
 /* Function summary where the IPA CP transformations are actually stored.  */
 extern GTY(()) function_summary <ipcp_transformation *> *ipcp_transformation_sum;
-
-/* Return the associated parameter/argument info corresponding to the given
-   node/edge.  */
-#define IPA_NODE_REF(NODE) (ipa_node_params_sum->get (NODE))
-#define IPA_NODE_REF_GET_CREATE(NODE) (ipa_node_params_sum->get_create (NODE))
-#define IPA_EDGE_REF(EDGE) (ipa_edge_args_sum->get (EDGE))
-#define IPA_EDGE_REF_GET_CREATE(EDGE) (ipa_edge_args_sum->get_create (EDGE))
-/* This macro checks validity of index returned by
-   ipa_get_param_decl_index function.  */
-#define IS_VALID_JUMP_FUNC_INDEX(I) ((I) != -1)
 
 /* Creating and freeing ipa_node_params and ipa_edge_args.  */
 void ipa_create_all_node_params (void);

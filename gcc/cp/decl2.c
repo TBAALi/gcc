@@ -1,5 +1,5 @@
 /* Process declarations and variables for C++ compiler.
-   Copyright (C) 1988-2020 Free Software Foundation, Inc.
+   Copyright (C) 1988-2021 Free Software Foundation, Inc.
    Hacked by Michael Tiemann (tiemann@cygnus.com)
 
 This file is part of GCC.
@@ -974,7 +974,11 @@ grokfield (const cp_declarator *declarator,
   if ((TREE_CODE (value) == FUNCTION_DECL
        || TREE_CODE (value) == TEMPLATE_DECL)
       && DECL_CONTEXT (value) != current_class_type)
-    return value;
+    {
+      if (attrlist)
+	cplus_decl_attributes (&value, attrlist, 0);
+      return value;
+    }
 
   /* Need to set this before push_template_decl.  */
   if (VAR_P (value))
@@ -1117,7 +1121,7 @@ grokbitfield (const cp_declarator *declarator,
 	  && !INTEGRAL_OR_UNSCOPED_ENUMERATION_TYPE_P (TREE_TYPE (width)))
 	error ("width of bit-field %qD has non-integral type %qT", value,
 	       TREE_TYPE (width));
-      else
+      else if (!check_for_bare_parameter_packs (width))
 	{
 	  /* Temporarily stash the width in DECL_BIT_FIELD_REPRESENTATIVE.
 	     check_bitfield_decl picks it from there later and sets DECL_SIZE
@@ -1278,9 +1282,9 @@ save_template_attributes (tree *attr_p, tree *decl_p, int flags)
 
   tree old_attrs = *q;
 
-  /* Merge the late attributes at the beginning with the attribute
+  /* Place the late attributes at the beginning of the attribute
      list.  */
-  late_attrs = merge_attributes (late_attrs, *q);
+  late_attrs = chainon (late_attrs, *q);
   if (*q != late_attrs
       && !DECL_P (*decl_p)
       && !(flags & ATTR_FLAG_TYPE_IN_PLACE))
@@ -1595,9 +1599,6 @@ cplus_decl_attributes (tree *decl, tree attributes, int flags)
       tree last_decl = find_last_decl (*decl);
       decl_attributes (decl, attributes, flags, last_decl);
     }
-
-  if (TREE_CODE (*decl) == TYPE_DECL)
-    SET_IDENTIFIER_TYPE_VALUE (DECL_NAME (*decl), TREE_TYPE (*decl));
 
   /* Propagate deprecation out to the template.  */
   if (TREE_DEPRECATED (*decl))
@@ -2358,9 +2359,6 @@ min_vis_r (tree *tp, int *walk_subtrees, void *data)
   int this_vis = VISIBILITY_DEFAULT;
   if (! TYPE_P (*tp))
     *walk_subtrees = 0;
-  else if (typedef_variant_p (*tp))
-    /* Look through typedefs despite cp_walk_subtrees.  */
-    this_vis = type_visibility (DECL_ORIGINAL_TYPE (TYPE_NAME (*tp)));
   else if (OVERLOAD_TYPE_P (*tp)
 	   && !TREE_PUBLIC (TYPE_MAIN_DECL (*tp)))
     {
@@ -2378,6 +2376,10 @@ min_vis_r (tree *tp, int *walk_subtrees, void *data)
 
   if (this_vis > *vis_p)
     *vis_p = this_vis;
+
+  /* Tell cp_walk_subtrees to look through typedefs.  */
+  if (*walk_subtrees == 1)
+    *walk_subtrees = 2;
 
   return NULL;
 }
@@ -5531,7 +5533,8 @@ cp_warn_deprecated_use_scopes (tree scope)
 	 && scope != error_mark_node
 	 && scope != global_namespace)
     {
-      if (cp_warn_deprecated_use (scope))
+      if ((TREE_CODE (scope) == NAMESPACE_DECL || OVERLOAD_TYPE_P (scope))
+	  && cp_warn_deprecated_use (scope))
 	return;
       if (TYPE_P (scope))
 	scope = CP_TYPE_CONTEXT (scope);

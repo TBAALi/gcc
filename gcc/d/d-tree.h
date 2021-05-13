@@ -1,5 +1,5 @@
 /* d-tree.h -- Definitions and declarations for code generation.
-   Copyright (C) 2006-2020 Free Software Foundation, Inc.
+   Copyright (C) 2006-2021 Free Software Foundation, Inc.
 
 GCC is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -59,7 +59,13 @@ typedef Array <Expression *> Expressions;
    Usage of DECL_LANG_FLAG_?:
    0: LABEL_VARIABLE_CASE (in LABEL_DECL).
       DECL_BUILT_IN_CTFE (in FUNCTION_DECL).
-   1: DECL_IN_UNITTEST_CONDITION_P (in FUNCTION_DECL).  */
+   1: DECL_IN_UNITTEST_CONDITION_P (in FUNCTION_DECL).
+   2: DECL_INSTANTIATED (in FUNCTION_DECL, VAR_DECL).  */
+
+/* Language-specific tree checkers.  */
+
+#define VAR_OR_FUNCTION_DECL_CHECK(NODE) \
+  TREE_CHECK2 (NODE, VAR_DECL, FUNCTION_DECL)
 
 /* The kinds of scopes we recognize.  */
 
@@ -80,7 +86,7 @@ enum level_kind
 
 enum intrinsic_code
 {
-#define DEF_D_INTRINSIC(CODE, B, N, M, D, C) INTRINSIC_ ## CODE,
+#define DEF_D_INTRINSIC(CODE, B, N, M, D, C) CODE,
 
 #include "intrinsics.def"
 
@@ -388,6 +394,10 @@ lang_tree_node
 #define DECL_IN_UNITTEST_CONDITION_P(NODE) \
   (DECL_LANG_FLAG_1 (FUNCTION_DECL_CHECK (NODE)))
 
+/* True if the decl comes from a template instance.  */
+#define DECL_INSTANTIATED(NODE) \
+  (DECL_LANG_FLAG_1 (VAR_OR_FUNCTION_DECL_CHECK (NODE)))
+
 enum d_tree_index
 {
   DTI_VTABLE_ENTRY_TYPE,
@@ -621,7 +631,6 @@ extern void d_finish_decl (tree);
 extern tree make_thunk (FuncDeclaration *, int);
 extern tree start_function (FuncDeclaration *);
 extern void finish_function (tree);
-extern void mark_needed (tree);
 extern tree get_vtable_decl (ClassDeclaration *);
 extern tree build_new_class_expr (ClassReferenceExp *);
 extern tree aggregate_initializer_decl (AggregateDeclaration *);
@@ -631,8 +640,7 @@ extern tree enum_initializer_decl (EnumDeclaration *);
 extern tree build_artificial_decl (tree, tree, const char * = NULL);
 extern tree create_field_decl (tree, const char *, int, int);
 extern void build_type_decl (tree, Dsymbol *);
-extern void d_comdat_linkage (tree);
-extern void d_linkonce_linkage (tree);
+extern void set_linkage_for_decl (tree);
 
 /* In expr.cc.  */
 extern tree build_expr (Expression *, bool = false, bool = false);

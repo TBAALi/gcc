@@ -1,5 +1,5 @@
 /* Part of CPP library.  (Macro and #define handling.)
-   Copyright (C) 1986-2020 Free Software Foundation, Inc.
+   Copyright (C) 1986-2021 Free Software Foundation, Inc.
    Written by Per Bothner, 1994.
    Based on CCCP program by Paul Rubin, June 1986
    Adapted to ANSI C, Richard Stallman, Jan 1987
@@ -3010,7 +3010,7 @@ cpp_get_token_1 (cpp_reader *pfile, location_t *location)
 
 	  if (need_search)
 	    {
-	      found = cpp_find_header_unit (pfile, fname, angle, tmp->src_loc);
+	      found = _cpp_find_header_unit (pfile, fname, angle, tmp->src_loc);
 	      if (!found)
 		found = "";
 	      len = strlen (found);

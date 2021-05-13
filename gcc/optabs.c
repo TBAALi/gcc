@@ -1,5 +1,5 @@
 /* Expand the basic unary and binary arithmetic operations, for GNU compiler.
-   Copyright (C) 1987-2020 Free Software Foundation, Inc.
+   Copyright (C) 1987-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -4294,13 +4294,6 @@ prepare_cmp_insn (rtx x, rtx y, enum rtx_code comparison, rtx size,
           > COSTS_N_INSNS (1)))
     y = force_reg (mode, y);
 
-#if HAVE_cc0
-  /* Make sure if we have a canonical comparison.  The RTL
-     documentation states that canonical comparisons are required only
-     for targets which have cc0.  */
-  gcc_assert (!CONSTANT_P (x) || CONSTANT_P (y));
-#endif
-
   /* Don't let both operands fail to indicate the mode.  */
   if (GET_MODE (x) == VOIDmode && GET_MODE (y) == VOIDmode)
     x = force_reg (mode, x);
@@ -6070,11 +6063,8 @@ expand_vec_perm_const (machine_mode mode, rtx v0, rtx v1,
 
   if (targetm.vectorize.vec_perm_const != NULL)
     {
-      v0 = force_reg (mode, v0);
       if (single_arg_p)
 	v1 = v0;
-      else
-	v1 = force_reg (mode, v1);
 
       if (targetm.vectorize.vec_perm_const (mode, target, v0, v1, indices))
 	return target;
@@ -6094,6 +6084,11 @@ expand_vec_perm_const (machine_mode mode, rtx v0, rtx v1,
 					       v1_qi, qimode_indices))
 	return gen_lowpart (mode, target_qi);
     }
+
+  v0 = force_reg (mode, v0);
+  if (single_arg_p)
+    v1 = v0;
+  v1 = force_reg (mode, v1);
 
   /* Otherwise expand as a fully variable permuation.  */
 

@@ -1,6 +1,6 @@
 /* Tree lowering pass.  This pass converts the GENERIC functions-as-trees
    tree representation into the GIMPLE form.
-   Copyright (C) 2002-2020 Free Software Foundation, Inc.
+   Copyright (C) 2002-2021 Free Software Foundation, Inc.
    Major work done by Sebastian Pop <s.pop@laposte.net>,
    Diego Novillo <dnovillo@redhat.com> and Jason Merrill <jason@redhat.com>.
 
@@ -1795,7 +1795,13 @@ gimplify_decl_expr (tree *stmt_p, gimple_seq *seq_p)
 	  && !DECL_HAS_VALUE_EXPR_P (decl)
 	  && DECL_ALIGN (decl) <= MAX_SUPPORTED_STACK_ALIGNMENT
 	  && dbg_cnt (asan_use_after_scope)
-	  && !gimplify_omp_ctxp)
+	  && !gimplify_omp_ctxp
+	  /* GNAT introduces temporaries to hold return values of calls in
+	     initializers of variables defined in other units, so the
+	     declaration of the variable is discarded completely.  We do not
+	     want to issue poison calls for such dropped variables.  */
+	  && (DECL_SEEN_IN_BIND_EXPR_P (decl)
+	      || (DECL_ARTIFICIAL (decl) && DECL_NAME (decl) == NULL_TREE)))
 	{
 	  asan_poisoned_variables->add (decl);
 	  asan_poison_variable (decl, false, seq_p);
@@ -5225,6 +5231,7 @@ gimplify_init_constructor (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 						       TREE_TYPE (ce->value)))
 	      TREE_STATIC (ctor) = 0;
 	  }
+	recompute_constructor_flags (ctor);
 	if (!is_gimple_reg (TREE_OPERAND (*expr_p, 0)))
 	  TREE_OPERAND (*expr_p, 1) = get_formal_tmp_var (ctor, pre_p);
       }
@@ -7072,7 +7079,7 @@ omp_add_variable (struct gimplify_omp_ctx *ctx, tree decl, unsigned int flags)
       if ((flags & GOVD_SHARED) == 0)
 	{
 	  t = TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (decl)));
-	  if (DECL_P (t))
+	  if (t && DECL_P (t))
 	    omp_notice_variable (ctx, t, true);
 	}
     }
@@ -7220,6 +7227,15 @@ omp_default_clause (struct gimplify_omp_ctx *ctx, tree decl,
   enum omp_clause_default_kind kind;
 
   kind = lang_hooks.decls.omp_predetermined_sharing (decl);
+  if (ctx->region_type & ORT_TASK)
+    {
+      tree detach_clause = omp_find_clause (ctx->clauses, OMP_CLAUSE_DETACH);
+
+      /* The event-handle specified by a detach clause should always be firstprivate,
+	 regardless of the current default.  */
+      if (detach_clause && OMP_CLAUSE_DECL (detach_clause) == decl)
+	kind = OMP_CLAUSE_DEFAULT_FIRSTPRIVATE;
+    }
   if (kind != OMP_CLAUSE_DEFAULT_UNSPECIFIED)
     default_kind = kind;
   else if (VAR_P (decl) && TREE_STATIC (decl) && DECL_IN_CONSTANT_POOL (decl))
@@ -8766,13 +8782,17 @@ gimplify_scan_omp_clauses (tree *list_p, gimple_seq *pre_p,
 	  if (TREE_CODE (decl) == MEM_REF)
 	    {
 	      tree type = TREE_TYPE (decl);
+	      bool saved_into_ssa = gimplify_ctxp->into_ssa;
+	      gimplify_ctxp->into_ssa = false;
 	      if (gimplify_expr (&TYPE_MAX_VALUE (TYPE_DOMAIN (type)), pre_p,
 				 NULL, is_gimple_val, fb_rvalue, false)
 		  == GS_ERROR)
 		{
+		  gimplify_ctxp->into_ssa = saved_into_ssa;
 		  remove = true;
 		  break;
 		}
+	      gimplify_ctxp->into_ssa = saved_into_ssa;
 	      tree v = TYPE_MAX_VALUE (TYPE_DOMAIN (type));
 	      if (DECL_P (v))
 		{
@@ -8782,13 +8802,16 @@ gimplify_scan_omp_clauses (tree *list_p, gimple_seq *pre_p,
 	      decl = TREE_OPERAND (decl, 0);
 	      if (TREE_CODE (decl) == POINTER_PLUS_EXPR)
 		{
+		  gimplify_ctxp->into_ssa = false;
 		  if (gimplify_expr (&TREE_OPERAND (decl, 1), pre_p,
 				     NULL, is_gimple_val, fb_rvalue, false)
 		      == GS_ERROR)
 		    {
+		      gimplify_ctxp->into_ssa = saved_into_ssa;
 		      remove = true;
 		      break;
 		    }
+		  gimplify_ctxp->into_ssa = saved_into_ssa;
 		  v = TREE_OPERAND (decl, 1);
 		  if (DECL_P (v))
 		    {
@@ -9391,6 +9414,18 @@ gimplify_scan_omp_clauses (tree *list_p, gimple_seq *pre_p,
 			}
 		    }
 		}
+	      else if ((code == OACC_ENTER_DATA
+			|| code == OACC_EXIT_DATA
+			|| code == OACC_DATA
+			|| code == OACC_PARALLEL
+			|| code == OACC_KERNELS
+			|| code == OACC_SERIAL)
+		       && OMP_CLAUSE_MAP_KIND (c) == GOMP_MAP_ATTACH_DETACH)
+		{
+		  gomp_map_kind k = (code == OACC_EXIT_DATA
+				     ? GOMP_MAP_DETACH : GOMP_MAP_ATTACH);
+		  OMP_CLAUSE_SET_MAP_KIND (c, k);
+		}
 
 	      if (gimplify_expr (pd, pre_p, NULL, is_gimple_lvalue, fb_lvalue)
 		  == GS_ERROR)
@@ -9753,6 +9788,10 @@ gimplify_scan_omp_clauses (tree *list_p, gimple_seq *pre_p,
 	      remove = true;
 	    }
 	  break;
+
+	case OMP_CLAUSE_DETACH:
+	  flags = GOVD_FIRSTPRIVATE | GOVD_SEEN;
+	  goto do_add;
 
 	case OMP_CLAUSE_IF:
 	  if (OMP_CLAUSE_IF_MODIFIER (c) != ERROR_MARK
@@ -10900,6 +10939,7 @@ gimplify_adjust_omp_clauses (gimple_seq *pre_p, gimple_seq body, tree *list_p,
 	case OMP_CLAUSE_DEFAULTMAP:
 	case OMP_CLAUSE_ORDER:
 	case OMP_CLAUSE_BIND:
+	case OMP_CLAUSE_DETACH:
 	case OMP_CLAUSE_USE_DEVICE_PTR:
 	case OMP_CLAUSE_USE_DEVICE_ADDR:
 	case OMP_CLAUSE_IS_DEVICE_PTR:
@@ -14288,7 +14328,8 @@ gimplify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 	     Doing so would prevent us from reporting a false positives.  */
 	  if (asan_poisoned_variables
 	      && asan_used_labels != NULL
-	      && asan_used_labels->contains (label))
+	      && asan_used_labels->contains (label)
+	      && !gimplify_omp_ctxp)
 	    asan_poison_variables (asan_poisoned_variables, false, pre_p);
 	  break;
 
@@ -15100,10 +15141,14 @@ gimplify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 void
 gimplify_type_sizes (tree type, gimple_seq *list_p)
 {
-  tree field, t;
-
   if (type == NULL || type == error_mark_node)
     return;
+
+  const bool ignored_p
+    = TYPE_NAME (type)
+      && TREE_CODE (TYPE_NAME (type)) == TYPE_DECL
+      && DECL_IGNORED_P (TYPE_NAME (type));
+  tree t;
 
   /* We first do the main variant, then copy into any other variants.  */
   type = TYPE_MAIN_VARIANT (type);
@@ -15138,9 +15183,7 @@ gimplify_type_sizes (tree type, gimple_seq *list_p)
       /* Ensure VLA bounds aren't removed, for -O0 they should be variables
 	 with assigned stack slots, for -O1+ -g they should be tracked
 	 by VTA.  */
-      if (!(TYPE_NAME (type)
-	    && TREE_CODE (TYPE_NAME (type)) == TYPE_DECL
-	    && DECL_IGNORED_P (TYPE_NAME (type)))
+      if (!ignored_p
 	  && TYPE_DOMAIN (type)
 	  && INTEGRAL_TYPE_P (TYPE_DOMAIN (type)))
 	{
@@ -15156,10 +15199,16 @@ gimplify_type_sizes (tree type, gimple_seq *list_p)
     case RECORD_TYPE:
     case UNION_TYPE:
     case QUAL_UNION_TYPE:
-      for (field = TYPE_FIELDS (type); field; field = DECL_CHAIN (field))
+      for (tree field = TYPE_FIELDS (type); field; field = DECL_CHAIN (field))
 	if (TREE_CODE (field) == FIELD_DECL)
 	  {
 	    gimplify_one_sizepos (&DECL_FIELD_OFFSET (field), list_p);
+	    /* Likewise, ensure variable offsets aren't removed.  */
+	    if (!ignored_p
+		&& (t = DECL_FIELD_OFFSET (field))
+		&& VAR_P (t)
+		&& DECL_ARTIFICIAL (t))
+	      DECL_IGNORED_P (t) = 0;
 	    gimplify_one_sizepos (&DECL_SIZE (field), list_p);
 	    gimplify_one_sizepos (&DECL_SIZE_UNIT (field), list_p);
 	    gimplify_type_sizes (TREE_TYPE (field), list_p);

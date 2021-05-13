@@ -1,5 +1,5 @@
 /* Definitions for the ubiquitous 'tree' type for GNU compilers.
-   Copyright (C) 1989-2020 Free Software Foundation, Inc.
+   Copyright (C) 1989-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -1912,16 +1912,27 @@ class auto_suppress_location_wrappers
 #define OMP_CLAUSE_OPERAND(NODE, I)				\
 	OMP_CLAUSE_ELT_CHECK (NODE, I)
 
-/* In a BLOCK node.  */
+/* In a BLOCK (scope) node:
+   Variables declared in the scope NODE.  */
 #define BLOCK_VARS(NODE) (BLOCK_CHECK (NODE)->block.vars)
 #define BLOCK_NONLOCALIZED_VARS(NODE) \
   (BLOCK_CHECK (NODE)->block.nonlocalized_vars)
 #define BLOCK_NUM_NONLOCALIZED_VARS(NODE) \
   vec_safe_length (BLOCK_NONLOCALIZED_VARS (NODE))
 #define BLOCK_NONLOCALIZED_VAR(NODE,N) (*BLOCK_NONLOCALIZED_VARS (NODE))[N]
+/* A chain of BLOCKs (scopes) nested within the scope NODE.  */
 #define BLOCK_SUBBLOCKS(NODE) (BLOCK_CHECK (NODE)->block.subblocks)
+/* The scope enclosing the scope NODE, or FUNCTION_DECL for the "outermost"
+   function scope.  Inlined functions are chained by this so that given
+   expression E and its TREE_BLOCK(E) B, BLOCK_SUPERCONTEXT(B) is the scope
+   in which E has been made or into which E has been inlined.   */
 #define BLOCK_SUPERCONTEXT(NODE) (BLOCK_CHECK (NODE)->block.supercontext)
+/* Points to the next scope at the same level of nesting as scope NODE.  */
 #define BLOCK_CHAIN(NODE) (BLOCK_CHECK (NODE)->block.chain)
+/* A BLOCK, or FUNCTION_DECL of the function from which a block has been
+   inlined.  In a scope immediately enclosing an inlined leaf expression,
+   points to the outermost scope into which it has been inlined (thus
+   bypassing all intermediate BLOCK_SUPERCONTEXTs). */
 #define BLOCK_ABSTRACT_ORIGIN(NODE) (BLOCK_CHECK (NODE)->block.abstract_origin)
 #define BLOCK_ORIGIN(NODE) \
   (BLOCK_ABSTRACT_ORIGIN(NODE) ? BLOCK_ABSTRACT_ORIGIN(NODE) : (NODE))
@@ -2067,12 +2078,16 @@ extern tree vector_element_bits_tree (const_tree);
    to this type.  */
 #define TYPE_ATTRIBUTES(NODE) (TYPE_CHECK (NODE)->type_common.attributes)
 
+/* Raw access to the alignment field.  */
+#define TYPE_ALIGN_RAW(NODE)			\
+  (TYPE_CHECK (NODE)->type_common.align)
+
 /* The alignment necessary for objects of this type.
    The value is an int, measured in bits and must be a power of two.
    We support also an "alignment" of zero.  */
-#define TYPE_ALIGN(NODE) \
-    (TYPE_CHECK (NODE)->type_common.align \
-     ? ((unsigned)1) << ((NODE)->type_common.align - 1) : 0)
+#define TYPE_ALIGN(NODE)					\
+  (TYPE_ALIGN_RAW (NODE)					\
+   ? ((unsigned)1) << (TYPE_ALIGN_RAW(NODE) - 1) : 0)
 
 /* Specify that TYPE_ALIGN(NODE) is X.  */
 #define SET_TYPE_ALIGN(NODE, X) \
@@ -3118,7 +3133,10 @@ set_function_decl_type (tree decl, function_decl_type t, bool set)
   (FUNCTION_DECL_CHECK (NODE)->function_decl.returns_twice_flag)
 
 /* Nonzero in a FUNCTION_DECL means this function should be treated
-   as "pure" function (like const function, but may read global memory).  */
+   as "pure" function (like const function, but may read global memory).
+   Note that being pure or const for a function is orthogonal to being
+   nothrow, i.e. it is valid to have DECL_PURE_P set and TREE_NOTHROW
+   cleared.  */
 #define DECL_PURE_P(NODE) (FUNCTION_DECL_CHECK (NODE)->function_decl.pure_flag)
 
 /* Nonzero only if one of TREE_READONLY or DECL_PURE_P is nonzero AND
@@ -4513,6 +4531,7 @@ extern tree build_vector_type (tree, poly_int64);
 extern tree build_truth_vector_type_for_mode (poly_uint64, machine_mode);
 extern tree build_opaque_vector_type (tree, poly_int64);
 extern tree build_index_type (tree);
+extern tree build_array_type_1 (tree, tree, bool, bool, bool);
 extern tree build_array_type (tree, tree, bool = false);
 extern tree build_nonshared_array_type (tree, tree);
 extern tree build_array_type_nelts (tree, poly_uint64);
@@ -4762,7 +4781,6 @@ extern tree last_field (const_tree) ATTRIBUTE_NONNULL (1);
 extern bool initializer_zerop (const_tree, bool * = NULL);
 extern bool initializer_each_zero_or_onep (const_tree);
 
-extern wide_int vector_cst_int_elt (const_tree, unsigned int);
 extern tree vector_cst_elt (const_tree, unsigned int);
 
 /* Given a vector VEC, return its first element if all elements are
@@ -4971,7 +4989,9 @@ static inline bool
 reverse_storage_order_for_component_p (tree t)
 {
   /* The storage order only applies to scalar components.  */
-  if (AGGREGATE_TYPE_P (TREE_TYPE (t)) || VECTOR_TYPE_P (TREE_TYPE (t)))
+  if (AGGREGATE_TYPE_P (TREE_TYPE (t))
+      || POINTER_TYPE_P (TREE_TYPE (t))
+      || VECTOR_TYPE_P (TREE_TYPE (t)))
     return false;
 
   if (TREE_CODE (t) == REALPART_EXPR || TREE_CODE (t) == IMAGPART_EXPR)
@@ -5078,7 +5098,10 @@ function_args_iter_next (function_args_iterator *i)
   i->next = TREE_CHAIN (i->next);
 }
 
-/* We set BLOCK_SOURCE_LOCATION only to inlined function entry points.  */
+/* Returns true if a BLOCK has a source location.
+   BLOCK_SOURCE_LOCATION is set only to inlined function entry points,
+   so the function returns true for all but the innermost and outermost
+   blocks into which an expression has been inlined.  */
 
 static inline bool
 inlined_function_outer_scope_p (const_tree block)

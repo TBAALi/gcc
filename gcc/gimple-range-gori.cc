@@ -1,5 +1,5 @@
 /* Gimple range GORI functions.
-   Copyright (C) 2017-2020 Free Software Foundation, Inc.
+   Copyright (C) 2017-2021 Free Software Foundation, Inc.
    Contributed by Andrew MacLeod <amacleod@redhat.com>
    and Aldy Hernandez <aldyh@redhat.com>.
 
@@ -29,6 +29,32 @@ along with GCC; see the file COPYING3.  If not see
 #include "gimple-pretty-print.h"
 #include "gimple-range.h"
 
+// Return TRUE if GS is a logical && or || expression.
+
+static inline bool
+is_gimple_logical_p (const gimple *gs)
+{
+  // Look for boolean and/or condition.
+  if (is_gimple_assign (gs))
+    switch (gimple_expr_code (gs))
+      {
+	case TRUTH_AND_EXPR:
+	case TRUTH_OR_EXPR:
+	  return true;
+
+	case BIT_AND_EXPR:
+	case BIT_IOR_EXPR:
+	  // Bitwise operations on single bits are logical too.
+	  if (types_compatible_p (TREE_TYPE (gimple_assign_rhs1 (gs)),
+				  boolean_type_node))
+	    return true;
+	  break;
+
+	default:
+	  break;
+      }
+  return false;
+}
 
 /* RANGE_DEF_CHAIN is used to determine what SSA names in a block can
    have range information calculated for them, and what the
@@ -76,6 +102,7 @@ public:
 private:
   vec<bitmap> m_def_chain;	// SSA_NAME : def chain components.
   void build_def_chain (tree name, bitmap result, basic_block bb);
+  int m_logical_depth;
 };
 
 
@@ -85,6 +112,7 @@ range_def_chain::range_def_chain ()
 {
   m_def_chain.create (0);
   m_def_chain.safe_grow_cleared (num_ssa_names);
+  m_logical_depth = 0;
 }
 
 // Destruct a range_def_chain.
@@ -157,6 +185,7 @@ range_def_chain::get_def_chain (tree name)
 {
   tree ssa1, ssa2, ssa3;
   unsigned v = SSA_NAME_VERSION (name);
+  bool is_logical = false;
 
   // If it has already been processed, just return the cached value.
   if (has_def_chain (name))
@@ -169,6 +198,15 @@ range_def_chain::get_def_chain (tree name)
   gimple *stmt = SSA_NAME_DEF_STMT (name);
   if (gimple_range_handler (stmt))
     {
+      is_logical = is_gimple_logical_p (stmt);
+      // Terminate the def chains if we see too many cascading logical stmts.
+      if (is_logical)
+	{
+	  if (m_logical_depth == param_ranger_logical_depth)
+	    return NULL;
+	  m_logical_depth++;
+	}
+
       ssa1 = gimple_range_ssa_p (gimple_range_operand1 (stmt));
       ssa2 = gimple_range_ssa_p (gimple_range_operand2 (stmt));
       ssa3 = NULL_TREE;
@@ -194,6 +232,9 @@ range_def_chain::get_def_chain (tree name)
     build_def_chain (ssa2, m_def_chain[v], bb);
   if (ssa3)
     build_def_chain (ssa3, m_def_chain[v], bb);
+
+  if (is_logical)
+    m_logical_depth--;
 
   // If we run into pathological cases where the defintion chains are
   // huge (ie  huge basic block fully unrolled) we might be able to limit
@@ -232,13 +273,14 @@ public:
   bool is_export_p (tree name, basic_block bb = NULL);
   bool def_chain_in_export_p (tree name, basic_block bb);
   bitmap exports (basic_block bb);
+  void set_range_invariant (tree name);
 
   void dump (FILE *f);
   void dump (FILE *f, basic_block bb);
 private:
   bitmap_obstack m_bitmaps;
   vec<bitmap> m_outgoing;	// BB: Outgoing ranges calculatable on edges
-  bitmap all_outgoing;		// All outgoing ranges combined. 
+  bitmap m_maybe_variant;	// Names which might have outgoing ranges.
   void maybe_add_gori (tree name, basic_block bb);
   void calculate_gori (basic_block bb);
 };
@@ -251,7 +293,7 @@ gori_map::gori_map ()
   m_outgoing.create (0);
   m_outgoing.safe_grow_cleared (last_basic_block_for_fn (cfun));
   bitmap_obstack_initialize (&m_bitmaps);
-  all_outgoing = BITMAP_ALLOC (&m_bitmaps);
+  m_maybe_variant = BITMAP_ALLOC (&m_bitmaps);
 }
 
 // Free any memory the GORI map allocated.
@@ -280,8 +322,16 @@ gori_map::is_export_p (tree name, basic_block bb)
 {
   // If no BB is specified, test if it is exported anywhere in the IL.
   if (!bb)
-    return bitmap_bit_p (all_outgoing, SSA_NAME_VERSION (name));
+    return bitmap_bit_p (m_maybe_variant, SSA_NAME_VERSION (name));
   return bitmap_bit_p (exports (bb), SSA_NAME_VERSION (name));
+}
+
+// Clear the m_maybe_variant bit so ranges will not be tracked for NAME.
+
+void
+gori_map::set_range_invariant (tree name)
+{
+  bitmap_clear_bit (m_maybe_variant, SSA_NAME_VERSION (name));
 }
 
 // Return true if any element in the def chain of NAME is in the
@@ -348,7 +398,7 @@ gori_map::calculate_gori (basic_block bb)
       maybe_add_gori (name, gimple_bb (stmt));
     }
   // Add this bitmap to the aggregate list of all outgoing names.
-  bitmap_ior_into (all_outgoing, m_outgoing[bb->index]);
+  bitmap_ior_into (m_maybe_variant, m_outgoing[bb->index]);
 }
 
 // Dump the table information for BB to file F.
@@ -447,7 +497,7 @@ gori_compute::gori_compute ()
   m_gori_map = new gori_map;
   unsigned x, lim = last_basic_block_for_fn (cfun);
   // Calculate outgoing range info upfront.  This will fully populate the
-  // all_outgoing bitmap which will help eliminate processing of names
+  // m_maybe_variant bitmap which will help eliminate processing of names
   // which never have their ranges adjusted.
   for (x = 0; x < lim ; x++)
     {
@@ -553,32 +603,6 @@ gori_compute::compute_operand_range_switch (irange &r, gswitch *s,
   return false;
 }
 
-// Return TRUE if GS is a logical && or || expression.
-
-static inline bool
-is_gimple_logical_p (const gimple *gs)
-{
-  // Look for boolean and/or condition.
-  if (gimple_code (gs) == GIMPLE_ASSIGN)
-    switch (gimple_expr_code (gs))
-      {
-	case TRUTH_AND_EXPR:
-	case TRUTH_OR_EXPR:
-	  return true;
-
-	case BIT_AND_EXPR:
-	case BIT_IOR_EXPR:
-	  // Bitwise operations on single bits are logical too.
-	  if (types_compatible_p (TREE_TYPE (gimple_assign_rhs1 (gs)),
-				  boolean_type_node))
-	    return true;
-	  break;
-
-	default:
-	  break;
-      }
-  return false;
-}
 
 // Return an evaluation for NAME as it would appear in STMT when the
 // statement's lhs evaluates to LHS.  If successful, return TRUE and
@@ -994,6 +1018,14 @@ gori_compute::has_edge_range_p (tree name, edge e)
 
   return (m_gori_map->is_export_p (name, e->src)
 	  || m_gori_map->def_chain_in_export_p (name, e->src));
+}
+
+// Clear the m_maybe_variant bit so ranges will not be tracked for NAME.
+
+void
+gori_compute::set_range_invariant (tree name)
+{
+  m_gori_map->set_range_invariant (name);
 }
 
 // Dump what is known to GORI computes to listing file F.

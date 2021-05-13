@@ -1,5 +1,5 @@
 /* Internal functions.
-   Copyright (C) 2011-2020 Free Software Foundation, Inc.
+   Copyright (C) 2011-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -110,10 +110,8 @@ init_internal_fns ()
 #define mask_store_direct { 3, 2, false }
 #define store_lanes_direct { 0, 0, false }
 #define mask_store_lanes_direct { 0, 0, false }
-#define vec_cond_mask_direct { 0, 0, false }
-#define vec_cond_direct { 0, 0, false }
-#define vec_condu_direct { 0, 0, false }
-#define vec_condeq_direct { 0, 0, false }
+#define vec_cond_mask_direct { 1, 0, false }
+#define vec_cond_direct { 2, 0, false }
 #define scatter_store_direct { 3, 1, false }
 #define len_store_direct { 3, 3, false }
 #define vec_set_direct { 3, 3, false }
@@ -245,6 +243,8 @@ expand_GOMP_SIMT_ENTER_ALLOC (internal_fn, gcall *stmt)
   create_input_operand (&ops[2], align, Pmode);
   gcc_assert (targetm.have_omp_simt_enter ());
   expand_insn (targetm.code_for_omp_simt_enter, 3, ops);
+  if (!rtx_equal_p (target, ops[0].value))
+    emit_move_insn (target, ops[0].value);
 }
 
 /* Deallocate per-lane storage and leave non-uniform execution region.  */
@@ -302,6 +302,8 @@ expand_GOMP_SIMT_LAST_LANE (internal_fn, gcall *stmt)
   create_input_operand (&ops[1], cond, mode);
   gcc_assert (targetm.have_omp_simt_last_lane ());
   expand_insn (targetm.code_for_omp_simt_last_lane, 2, ops);
+  if (!rtx_equal_p (target, ops[0].value))
+    emit_move_insn (target, ops[0].value);
 }
 
 /* Non-transparent predicate used in SIMT lowering of OpenMP "ordered".  */
@@ -321,6 +323,8 @@ expand_GOMP_SIMT_ORDERED_PRED (internal_fn, gcall *stmt)
   create_input_operand (&ops[1], ctr, mode);
   gcc_assert (targetm.have_omp_simt_ordered ());
   expand_insn (targetm.code_for_omp_simt_ordered, 2, ops);
+  if (!rtx_equal_p (target, ops[0].value))
+    emit_move_insn (target, ops[0].value);
 }
 
 /* "Or" boolean reduction across SIMT lanes: return non-zero in all lanes if
@@ -341,6 +345,8 @@ expand_GOMP_SIMT_VOTE_ANY (internal_fn, gcall *stmt)
   create_input_operand (&ops[1], cond, mode);
   gcc_assert (targetm.have_omp_simt_vote_any ());
   expand_insn (targetm.code_for_omp_simt_vote_any, 2, ops);
+  if (!rtx_equal_p (target, ops[0].value))
+    emit_move_insn (target, ops[0].value);
 }
 
 /* Exchange between SIMT lanes with a "butterfly" pattern: source lane index
@@ -363,6 +369,8 @@ expand_GOMP_SIMT_XCHG_BFLY (internal_fn, gcall *stmt)
   create_input_operand (&ops[2], idx, SImode);
   gcc_assert (targetm.have_omp_simt_xchg_bfly ());
   expand_insn (targetm.code_for_omp_simt_xchg_bfly, 3, ops);
+  if (!rtx_equal_p (target, ops[0].value))
+    emit_move_insn (target, ops[0].value);
 }
 
 /* Exchange between SIMT lanes according to given source lane index.  */
@@ -384,6 +392,8 @@ expand_GOMP_SIMT_XCHG_IDX (internal_fn, gcall *stmt)
   create_input_operand (&ops[2], idx, SImode);
   gcc_assert (targetm.have_omp_simt_xchg_idx ());
   expand_insn (targetm.code_for_omp_simt_xchg_idx, 3, ops);
+  if (!rtx_equal_p (target, ops[0].value))
+    emit_move_insn (target, ops[0].value);
 }
 
 /* This should get expanded in adjust_simduid_builtins.  */
@@ -2766,7 +2776,7 @@ expand_partial_store_optab_fn (internal_fn, gcall *stmt, convert_optab optab)
    The expansion of STMT happens based on OPTAB table associated.  */
 
 static void
-expand_vect_cond_optab_fn (internal_fn, gcall *stmt, convert_optab optab)
+expand_vec_cond_optab_fn (internal_fn, gcall *stmt, convert_optab optab)
 {
   class expand_operand ops[6];
   insn_code icode;
@@ -2802,15 +2812,11 @@ expand_vect_cond_optab_fn (internal_fn, gcall *stmt, convert_optab optab)
     emit_move_insn (target, ops[0].value);
 }
 
-#define expand_vec_cond_optab_fn expand_vect_cond_optab_fn
-#define expand_vec_condu_optab_fn expand_vect_cond_optab_fn
-#define expand_vec_condeq_optab_fn expand_vect_cond_optab_fn
-
 /* Expand VCOND_MASK optab internal function.
    The expansion of STMT happens based on OPTAB table associated.  */
 
 static void
-expand_vect_cond_mask_optab_fn (internal_fn, gcall *stmt, convert_optab optab)
+expand_vec_cond_mask_optab_fn (internal_fn, gcall *stmt, convert_optab optab)
 {
   class expand_operand ops[4];
 
@@ -2843,8 +2849,6 @@ expand_vect_cond_mask_optab_fn (internal_fn, gcall *stmt, convert_optab optab)
   if (!rtx_equal_p (ops[0].value, target))
     emit_move_insn (target, ops[0].value);
 }
-
-#define expand_vec_cond_mask_optab_fn expand_vect_cond_mask_optab_fn
 
 /* Expand VEC_SET internal functions.  */
 
@@ -3570,10 +3574,8 @@ multi_vector_optab_supported_p (convert_optab optab, tree_pair types,
 #define direct_mask_store_optab_supported_p convert_optab_supported_p
 #define direct_store_lanes_optab_supported_p multi_vector_optab_supported_p
 #define direct_mask_store_lanes_optab_supported_p multi_vector_optab_supported_p
-#define direct_vec_cond_mask_optab_supported_p multi_vector_optab_supported_p
-#define direct_vec_cond_optab_supported_p multi_vector_optab_supported_p
-#define direct_vec_condu_optab_supported_p multi_vector_optab_supported_p
-#define direct_vec_condeq_optab_supported_p multi_vector_optab_supported_p
+#define direct_vec_cond_mask_optab_supported_p convert_optab_supported_p
+#define direct_vec_cond_optab_supported_p convert_optab_supported_p
 #define direct_scatter_store_optab_supported_p convert_optab_supported_p
 #define direct_len_store_optab_supported_p direct_optab_supported_p
 #define direct_while_optab_supported_p convert_optab_supported_p

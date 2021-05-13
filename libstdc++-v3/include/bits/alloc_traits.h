@@ -1,6 +1,6 @@
 // Allocator traits -*- C++ -*-
 
-// Copyright (C) 2011-2020 Free Software Foundation, Inc.
+// Copyright (C) 2011-2021 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -341,7 +341,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       { __a.deallocate(__p, __n); }
 
       /**
-       *  @brief  Construct an object of type @a _Tp
+       *  @brief  Construct an object of type `_Tp`
        *  @param  __a  An allocator.
        *  @param  __p  Pointer to memory of suitable size and alignment for Tp
        *  @param  __args Constructor arguments.

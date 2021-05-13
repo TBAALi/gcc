@@ -1,5 +1,5 @@
 /* Search for references that a functions loads or stores.
-   Copyright (C) 2020 Free Software Foundation, Inc.
+   Copyright (C) 2020-2021 Free Software Foundation, Inc.
    Contributed by David Cepelik and Jan Hubicka
 
 This file is part of GCC.
@@ -36,7 +36,7 @@ along with GCC; see the file COPYING3.  If not see
 
    The following information is computed
      1) load/store access tree described in ipa-modref-tree.h
-	This is used by tree-ssa-alias to disambiguate load/dtores
+	This is used by tree-ssa-alias to disambiguate load/stores
      2) EAF flags used by points-to analysis (in tree-ssa-structlias).
 	and defined in tree-core.h.
    and stored to optimization_summaries.
@@ -835,10 +835,6 @@ merge_call_side_effects (modref_summary *cur_summary,
   auto_vec <modref_parm_map, 32> parm_map;
   bool changed = false;
 
-  if (dump_file)
-    fprintf (dump_file, " - Merging side effects of %s with parm map:",
-	     callee_node->dump_name ());
-
   /* We can not safely optimize based on summary of callee if it does
      not always bind to current def: it is possible that memory load
      was optimized out earlier which may not happen in the interposed
@@ -849,6 +845,10 @@ merge_call_side_effects (modref_summary *cur_summary,
 	fprintf (dump_file, " - May be interposed: collapsing loads.\n");
       cur_summary->loads->collapse ();
     }
+
+  if (dump_file)
+    fprintf (dump_file, " - Merging side effects of %s with parm map:",
+	     callee_node->dump_name ());
 
   parm_map.safe_grow_cleared (gimple_call_num_args (stmt), true);
   for (unsigned i = 0; i < gimple_call_num_args (stmt); i++)
@@ -1247,11 +1247,13 @@ analyze_stmt (modref_summary *summary, modref_summary_lto *summary_lto,
 	    && (!fnspec.global_memory_read_p ()
 		|| !fnspec.global_memory_written_p ()))
 	  {
-	    fnspec_summaries->get_create
-		 (cgraph_node::get (current_function_decl)->get_edge (stmt))
-			->fnspec = xstrdup (fnspec.get_str ());
-	    if (dump_file)
-	      fprintf (dump_file, "  Recorded fnspec %s\n", fnspec.get_str ());
+	    cgraph_edge *e = cgraph_node::get (current_function_decl)->get_edge (stmt);
+	    if (e->callee)
+	      {
+		fnspec_summaries->get_create (e)->fnspec = xstrdup (fnspec.get_str ());
+		if (dump_file)
+		  fprintf (dump_file, "  Recorded fnspec %s\n", fnspec.get_str ());
+	      }
 	  }
       }
      return true;
@@ -1543,9 +1545,9 @@ merge_call_lhs_flags (gcall *call, int arg, int index, bool deref,
       tree lhs = gimple_call_lhs (call);
       analyze_ssa_name_flags (lhs, lattice, depth + 1, ipa);
       if (deref)
-	lattice[index].merge (lattice[SSA_NAME_VERSION (lhs)]);
-      else
 	lattice[index].merge_deref (lattice[SSA_NAME_VERSION (lhs)], false);
+      else
+	lattice[index].merge (lattice[SSA_NAME_VERSION (lhs)]);
     }
   /* In the case of memory store we can do nothing.  */
   else
@@ -1597,14 +1599,12 @@ analyze_ssa_name_flags (tree name, vec<modref_lattice> &lattice, int depth,
   FOR_EACH_IMM_USE_STMT (use_stmt, ui, name)
     {
       if (lattice[index].flags == 0)
-	{
-	  BREAK_FROM_IMM_USE_STMT (ui);
-	}
+	break;
       if (is_gimple_debug (use_stmt))
 	continue;
       if (dump_file)
 	{
-	  fprintf (dump_file, "%*s  Analyzing stmt:", depth * 4, "");
+	  fprintf (dump_file, "%*s  Analyzing stmt: ", depth * 4, "");
 	  print_gimple_stmt (dump_file, use_stmt, 0);
 	}
 
@@ -1621,9 +1621,19 @@ analyze_ssa_name_flags (tree name, vec<modref_lattice> &lattice, int depth,
       else if (gcall *call = dyn_cast <gcall *> (use_stmt))
 	{
 	  tree callee = gimple_call_fndecl (call);
-
+	  /* Return slot optimization would require bit of propagation;
+	     give up for now.  */
+	  if (gimple_call_return_slot_opt_p (call)
+	      && gimple_call_lhs (call) != NULL_TREE
+	      && TREE_ADDRESSABLE (TREE_TYPE (gimple_call_lhs (call))))
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "%*s  Unhandled return slot opt\n",
+			 depth * 4, "");
+	      lattice[index].merge (0);
+	    }
 	  /* Recursion would require bit of propagation; give up for now.  */
-	  if (callee && !ipa && recursive_call_p (current_function_decl,
+	  else if (callee && !ipa && recursive_call_p (current_function_decl,
 						  callee))
 	    lattice[index].merge (0);
 	  else
@@ -1663,7 +1673,7 @@ analyze_ssa_name_flags (tree name, vec<modref_lattice> &lattice, int depth,
 
 			if (!record_ipa)
 			  lattice[index].merge (call_flags);
-			if (record_ipa)
+			else
 			  lattice[index].add_escape_point (call, i,
 			     				   call_flags, true);
 		      }
@@ -1681,8 +1691,8 @@ analyze_ssa_name_flags (tree name, vec<modref_lattice> &lattice, int depth,
 			int call_flags = deref_flags
 			   (gimple_call_arg_flags (call, i), ignore_stores);
 			if (!record_ipa)
-			    lattice[index].merge (call_flags);
-			if (record_ipa)
+			  lattice[index].merge (call_flags);
+			else
 			  lattice[index].add_escape_point (call, i,
 							   call_flags, false);
 		      }
@@ -2889,7 +2899,7 @@ compute_parm_map (cgraph_edge *callee_edge, vec<modref_parm_map> *parm_map)
   class ipa_edge_args *args;
   if (ipa_node_params_sum
       && !callee_edge->call_stmt_cannot_inline_p
-      && (args = IPA_EDGE_REF (callee_edge)) != NULL)
+      && (args = ipa_edge_args_sum->get (callee_edge)) != NULL)
     {
       int i, count = ipa_get_cs_argument_count (args);
       class ipa_node_params *caller_parms_info, *callee_pi;
@@ -2899,10 +2909,11 @@ compute_parm_map (cgraph_edge *callee_edge, vec<modref_parm_map> *parm_map)
 	 = callee_edge->callee->function_or_virtual_thunk_symbol
 			      (NULL, callee_edge->caller);
 
-      caller_parms_info = IPA_NODE_REF (callee_edge->caller->inlined_to
-					? callee_edge->caller->inlined_to
-					: callee_edge->caller);
-      callee_pi = IPA_NODE_REF (callee);
+      caller_parms_info
+	= ipa_node_params_sum->get (callee_edge->caller->inlined_to
+				    ? callee_edge->caller->inlined_to
+				    : callee_edge->caller);
+      callee_pi = ipa_node_params_sum->get (callee);
 
       (*parm_map).safe_grow_cleared (count, true);
 
@@ -3230,8 +3241,8 @@ get_access_for_fnspec (cgraph_edge *e, attr_fnspec &fnspec,
     {
       cgraph_node *node = e->caller->inlined_to
 			  ? e->caller->inlined_to : e->caller;
-      class ipa_node_params *caller_parms_info = IPA_NODE_REF (node);
-      class ipa_edge_args *args = IPA_EDGE_REF (e);
+      ipa_node_params *caller_parms_info = ipa_node_params_sum->get (node);
+      ipa_edge_args *args = ipa_edge_args_sum->get (e);
       struct ipa_jump_func *jf = ipa_get_ith_jump_func (args, size_arg);
 
       if (jf)
@@ -3857,7 +3868,8 @@ ipa_modref_c_finalize ()
   if (optimization_summaries)
     ggc_delete (optimization_summaries);
   optimization_summaries = NULL;
-  gcc_checking_assert (!summaries);
+  gcc_checking_assert (!summaries
+		       || flag_incremental_link == INCREMENTAL_LINK_LTO);
   if (summaries_lto)
     ggc_delete (summaries_lto);
   summaries_lto = NULL;

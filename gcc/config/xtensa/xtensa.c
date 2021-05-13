@@ -1,5 +1,5 @@
 /* Subroutines for insn-output.c for Tensilica's Xtensa architecture.
-   Copyright (C) 2001-2020 Free Software Foundation, Inc.
+   Copyright (C) 2001-2021 Free Software Foundation, Inc.
    Contributed by Bob Wilson (bwilson@tensilica.com) at Tensilica.
 
 This file is part of GCC.
@@ -898,7 +898,7 @@ gen_conditional_move (enum rtx_code code, machine_mode mode,
 	  code = GE;
 	  op1 = const0_rtx;
 	}
-      cmp = gen_rtx_fmt_ee (code, VOIDmode, cc0_rtx, const0_rtx);
+      cmp = gen_rtx_fmt_ee (code, VOIDmode, pc_rtx, const0_rtx);
 
       if (boolean_operator (cmp, VOIDmode))
 	{

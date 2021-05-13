@@ -28,6 +28,7 @@ func TestMatch(t *testing.T) {
 	ctxt := Default
 	what := "default"
 	match := func(tag string, want map[string]bool) {
+		t.Helper()
 		m := make(map[string]bool)
 		if !ctxt.match(tag, m) {
 			t.Errorf("%s context should match %s, does not", what, tag)
@@ -37,6 +38,7 @@ func TestMatch(t *testing.T) {
 		}
 	}
 	nomatch := func(tag string, want map[string]bool) {
+		t.Helper()
 		m := make(map[string]bool)
 		if ctxt.match(tag, m) {
 			t.Errorf("%s context should NOT match %s, does", what, tag)
@@ -57,7 +59,6 @@ func TestMatch(t *testing.T) {
 	nomatch(runtime.GOOS+","+runtime.GOARCH+",!foo", map[string]bool{runtime.GOOS: true, runtime.GOARCH: true, "foo": true})
 	match(runtime.GOOS+","+runtime.GOARCH+",!bar", map[string]bool{runtime.GOOS: true, runtime.GOARCH: true, "bar": true})
 	nomatch(runtime.GOOS+","+runtime.GOARCH+",bar", map[string]bool{runtime.GOOS: true, runtime.GOARCH: true, "bar": true})
-	nomatch("!", map[string]bool{})
 }
 
 func TestDotSlashImport(t *testing.T) {
@@ -613,7 +614,7 @@ func TestImportPackageOutsideModule(t *testing.T) {
 	ctxt.GOPATH = gopath
 	ctxt.Dir = filepath.Join(gopath, "src/example.com/p")
 
-	want := "working directory is not part of a module"
+	want := "go.mod file not found in current directory or any parent directory"
 	if _, err := ctxt.Import("example.com/p", gopath, FindOnly); err == nil {
 		t.Fatal("importing package when no go.mod is present succeeded unexpectedly")
 	} else if errStr := err.Error(); !strings.Contains(errStr, want) {

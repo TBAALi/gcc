@@ -1,5 +1,5 @@
 /* Induction variable optimizations.
-   Copyright (C) 2003-2020 Free Software Foundation, Inc.
+   Copyright (C) 2003-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -7286,12 +7286,13 @@ rewrite_use_nonlinear_expr (struct ivopts_data *data,
     }
 
   comp = fold_convert (type, comp);
-  if (!valid_gimple_rhs_p (comp)
-      || (gimple_code (use->stmt) != GIMPLE_PHI
-	  /* We can't allow re-allocating the stmt as it might be pointed
-	     to still.  */
-	  && (get_gimple_rhs_num_ops (TREE_CODE (comp))
-	      >= gimple_num_ops (gsi_stmt (bsi)))))
+  comp = force_gimple_operand (comp, &seq, false, NULL);
+  gimple_seq_add_seq (&stmt_list, seq);
+  if (gimple_code (use->stmt) != GIMPLE_PHI
+      /* We can't allow re-allocating the stmt as it might be pointed
+	 to still.  */
+      && (get_gimple_rhs_num_ops (TREE_CODE (comp))
+	  >= gimple_num_ops (gsi_stmt (bsi))))
     {
       comp = force_gimple_operand (comp, &seq, true, NULL);
       gimple_seq_add_seq (&stmt_list, seq);
@@ -7627,7 +7628,7 @@ remove_unused_ivs (struct ivopts_data *data, bitmap toremove)
 		    count++;
 
 		  if (count > 1)
-		    BREAK_FROM_IMM_USE_STMT (imm_iter);
+		    break;
 		}
 
 	      if (!count)

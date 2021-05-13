@@ -1,5 +1,5 @@
 /* toir.cc -- Lower D frontend statements to GCC trees.
-   Copyright (C) 2006-2020 Free Software Foundation, Inc.
+   Copyright (C) 2006-2021 Free Software Foundation, Inc.
 
 GCC is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -1067,6 +1067,13 @@ public:
 	  }
 
 	add_stmt (return_expr (decl));
+      }
+    else if (tf->next->ty == Tnoreturn)
+      {
+	/* Returning an expression that has no value, but has a side effect
+	   that should never return.  */
+	add_stmt (build_expr_dtor (s->exp));
+	add_stmt (return_expr (NULL_TREE));
       }
     else
       {

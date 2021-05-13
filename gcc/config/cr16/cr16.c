@@ -1,5 +1,5 @@
 /* Output routines for CR16 processor.
-   Copyright (C) 2012-2020 Free Software Foundation, Inc.
+   Copyright (C) 2012-2021 Free Software Foundation, Inc.
    Contributed by KPIT Cummins Infosystems Limited.
   
    This file is part of GCC.
@@ -2093,37 +2093,6 @@ cr16_legitimate_constant_p (machine_mode mode ATTRIBUTE_UNUSED,
 			    rtx x ATTRIBUTE_UNUSED)
 {
   return 1;
-}
-
-void
-notice_update_cc (rtx exp)
-{
-  if (GET_CODE (exp) == SET)
-    {
-      /* Jumps do not alter the cc's.  */
-      if (SET_DEST (exp) == pc_rtx)
-	return;
-
-      /* Moving register or memory into a register:
-         it doesn't alter the cc's, but it might invalidate
-         the RTX's which we remember the cc's came from.
-         (Note that moving a constant 0 or 1 MAY set the cc's).  */
-      if (REG_P (SET_DEST (exp))
-	  && (REG_P (SET_SRC (exp)) || GET_CODE (SET_SRC (exp)) == MEM))
-	{
-	  return;
-	}
-
-      /* Moving register into memory doesn't alter the cc's.
-         It may invalidate the RTX's which we remember the cc's came from.  */
-      if (GET_CODE (SET_DEST (exp)) == MEM && REG_P (SET_SRC (exp)))
-	{
-	  return;
-	}
-    }
-
-  CC_STATUS_INIT;
-  return;
 }
 
 static scalar_int_mode

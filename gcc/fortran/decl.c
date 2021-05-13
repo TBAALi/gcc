@@ -1,5 +1,5 @@
 /* Declaration statement matcher
-   Copyright (C) 2002-2020 Free Software Foundation, Inc.
+   Copyright (C) 2002-2021 Free Software Foundation, Inc.
    Contributed by Andy Vaught
 
 This file is part of GCC.
@@ -2721,7 +2721,7 @@ variable_decl (int elem)
     }
 
   /* %FILL components may not have initializers.  */
-  if (gfc_str_startswith (name, "%FILL") && gfc_match_eos () != MATCH_YES)
+  if (startswith (name, "%FILL") && gfc_match_eos () != MATCH_YES)
     {
       gfc_error ("%qs entity cannot have an initializer at %C", "%FILL");
       m = MATCH_ERROR;
@@ -3066,8 +3066,7 @@ gfc_match_old_kind_spec (gfc_typespec *ts)
 	  if (flag_real4_kind == 16)
 	    ts->kind = 16;
 	}
-
-      if (ts->kind == 8)
+      else if (ts->kind == 8)
 	{
 	  if (flag_real8_kind == 4)
 	    ts->kind = 4;
@@ -3246,8 +3245,7 @@ close_brackets:
 	  if (flag_real4_kind == 16)
 	    ts->kind = 16;
 	}
-
-      if (ts->kind == 8)
+      else if (ts->kind == 8)
 	{
 	  if (flag_real8_kind == 4)
 	    ts->kind = 4;
@@ -8223,7 +8221,7 @@ gfc_match_end (gfc_statement *st)
     {
     case COMP_ASSOCIATE:
     case COMP_BLOCK:
-      if (gfc_str_startswith (block_name, "block@"))
+      if (startswith (block_name, "block@"))
 	block_name = NULL;
       break;
 
@@ -9856,7 +9854,8 @@ gfc_match_modproc (void)
   gfc_namespace *module_ns;
   gfc_interface *old_interface_head, *interface;
 
-  if (gfc_state_stack->state != COMP_INTERFACE
+  if ((gfc_state_stack->state != COMP_INTERFACE
+       && gfc_state_stack->state != COMP_CONTAINS)
       || gfc_state_stack->previous == NULL
       || current_interface.type == INTERFACE_NAMELESS
       || current_interface.type == INTERFACE_ABSTRACT)

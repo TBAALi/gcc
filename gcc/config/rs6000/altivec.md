@@ -1,5 +1,5 @@
 ;; AltiVec patterns.
-;; Copyright (C) 2002-2020 Free Software Foundation, Inc.
+;; Copyright (C) 2002-2021 Free Software Foundation, Inc.
 ;; Contributed by Aldy Hernandez (aldy@quesejoda.com)
 
 ;; This file is part of GCC.
@@ -193,8 +193,6 @@
 
 ;; Short vec int modes
 (define_mode_iterator VIshort [V8HI V16QI])
-;; Longer vec int modes for rotate/mask ops
-(define_mode_iterator VIlong [V2DI V4SI])
 ;; Vec float modes
 (define_mode_iterator VF [V4SF])
 ;; Vec modes, pity mode iterators are not composable
@@ -828,7 +826,8 @@
 		     UNSPEC_XXSPLTIW))]
  "TARGET_POWER10"
  "xxspltiw %x0,%1"
- [(set_attr "type" "vecsimple")])
+ [(set_attr "type" "vecsimple")
+  (set_attr "prefixed" "yes")])
 
 (define_expand "xxspltiw_v4sf"
   [(set (match_operand:V4SF 0 "register_operand" "=wa")
@@ -847,7 +846,8 @@
 		     UNSPEC_XXSPLTIW))]
  "TARGET_POWER10"
  "xxspltiw %x0,%1"
- [(set_attr "type" "vecsimple")])
+ [(set_attr "type" "vecsimple")
+  (set_attr "prefixed" "yes")])
 
 (define_expand "xxspltidp_v2df"
   [(set (match_operand:V2DF 0 "register_operand" )
@@ -866,7 +866,8 @@
 		     UNSPEC_XXSPLTID))]
   "TARGET_POWER10"
   "xxspltidp %x0,%1"
-  [(set_attr "type" "vecsimple")])
+  [(set_attr "type" "vecsimple")
+   (set_attr "prefixed" "yes")])
 
 (define_expand "xxsplti32dx_v4si"
   [(set (match_operand:V4SI 0 "register_operand" "=wa")
@@ -895,7 +896,8 @@
 		     UNSPEC_XXSPLTI32DX))]
   "TARGET_POWER10"
   "xxsplti32dx %x0,%2,%3"
-  [(set_attr "type" "vecsimple")])
+  [(set_attr "type" "vecsimple")
+   (set_attr "prefixed" "yes")])
 
 (define_expand "xxsplti32dx_v4sf"
   [(set (match_operand:V4SF 0 "register_operand" "=wa")
@@ -923,7 +925,8 @@
 		     UNSPEC_XXSPLTI32DX))]
   "TARGET_POWER10"
   "xxsplti32dx %x0,%2,%3"
-  [(set_attr "type" "vecsimple")])
+  [(set_attr "type" "vecsimple")
+   (set_attr "prefixed" "yes")])
 
 (define_insn "xxblend_<mode>"
   [(set (match_operand:VM3 0 "register_operand" "=wa")
@@ -933,7 +936,8 @@
 		    UNSPEC_XXBLEND))]
   "TARGET_POWER10"
   "xxblendv<VM3_char> %x0,%x1,%x2,%x3"
-  [(set_attr "type" "vecsimple")])
+  [(set_attr "type" "vecsimple")
+   (set_attr "prefixed" "yes")])
 
 (define_expand "xxpermx"
   [(set (match_operand:V2DI 0 "register_operand" "+wa")
@@ -977,7 +981,8 @@
 		     UNSPEC_XXPERMX))]
   "TARGET_POWER10"
   "xxpermx %x0,%x1,%x2,%x3,%4"
-  [(set_attr "type" "vecsimple")])
+  [(set_attr "type" "vecsimple")
+   (set_attr "prefixed" "yes")])
 
 (define_expand "vstrir_<mode>"
   [(set (match_operand:VIshort 0 "altivec_register_operand")
@@ -2773,10 +2778,10 @@
   DONE;
 })
 
-(define_insn "altivec_lvsl_reg"
+(define_insn "altivec_lvsl_reg_<mode>"
   [(set (match_operand:V16QI 0 "altivec_register_operand" "=v")
 	(unspec:V16QI
-	[(match_operand:DI 1 "gpc_reg_operand" "b")]
+	[(match_operand:GPR 1 "gpc_reg_operand" "b")]
 	UNSPEC_LVSL_REG))]
   "TARGET_ALTIVEC"
   "lvsl %0,0,%1"
@@ -2811,10 +2816,10 @@
   DONE;
 })
 
-(define_insn "altivec_lvsr_reg"
+(define_insn "altivec_lvsr_reg_<mode>"
   [(set (match_operand:V16QI 0 "altivec_register_operand" "=v")
        (unspec:V16QI
-       [(match_operand:DI 1 "gpc_reg_operand" "b")]
+       [(match_operand:GPR 1 "gpc_reg_operand" "b")]
        UNSPEC_LVSR_REG))]
   "TARGET_ALTIVEC"
   "lvsr %0,0,%1"
@@ -3625,7 +3630,8 @@
 		     UNSPEC_XXEVAL))]
    "TARGET_POWER10"
    "xxeval %0,%1,%2,%3,%4"
-   [(set_attr "type" "vecsimple")])
+   [(set_attr "type" "vecsimple")
+    (set_attr "prefixed" "yes")])
 
 (define_expand "vec_unpacku_hi_v16qi"
   [(set (match_operand:V8HI 0 "register_operand" "=v")

@@ -170,6 +170,12 @@ type PackageOpts struct {
 	// that occur while loading packages. SilenceErrors implies AllowErrors.
 	SilenceErrors bool
 
+	// SilenceMissingStdImports indicates that LoadPackages should not print
+	// errors or terminate the process if an imported package is missing, and the
+	// import path looks like it might be in the standard library (perhaps in a
+	// future version).
+	SilenceMissingStdImports bool
+
 	// SilenceUnmatchedWarnings suppresses the warnings normally emitted for
 	// patterns that did not match any packages.
 	SilenceUnmatchedWarnings bool
@@ -280,15 +286,20 @@ func LoadPackages(ctx context.Context, opts PackageOpts, patterns ...string) (ma
 	checkMultiplePaths()
 	for _, pkg := range loaded.pkgs {
 		if pkg.err != nil {
-			if pkg.flags.has(pkgInAll) {
-				if imErr := (*ImportMissingError)(nil); errors.As(pkg.err, &imErr) {
-					imErr.inAll = true
-				} else if sumErr := (*ImportMissingSumError)(nil); errors.As(pkg.err, &sumErr) {
-					sumErr.inAll = true
+			if sumErr := (*ImportMissingSumError)(nil); errors.As(pkg.err, &sumErr) {
+				if importer := pkg.stack; importer != nil {
+					sumErr.importer = importer.path
+					sumErr.importerVersion = importer.mod.Version
+					sumErr.importerIsTest = importer.testOf != nil
 				}
 			}
+			silence := opts.SilenceErrors
+			if stdErr := (*ImportMissingError)(nil); errors.As(pkg.err, &stdErr) &&
+				stdErr.isStd && opts.SilenceMissingStdImports {
+				silence = true
+			}
 
-			if !opts.SilenceErrors {
+			if !silence {
 				if opts.AllowErrors {
 					fmt.Fprintf(os.Stderr, "%s: %v\n", pkg.stackText(), pkg.err)
 				} else {
@@ -863,12 +874,21 @@ func loadFromRoots(params loaderParams) *loader {
 	for _, pkg := range ld.pkgs {
 		if pkg.mod == Target {
 			for _, dep := range pkg.imports {
-				if dep.mod.Path != "" {
+				if dep.mod.Path != "" && dep.mod.Path != Target.Path && index != nil {
+					_, explicit := index.require[dep.mod]
+					if allowWriteGoMod && cfg.BuildMod == "readonly" && !explicit {
+						// TODO(#40775): attach error to package instead of using
+						// base.Errorf. Ideally, 'go list' should not fail because of this,
+						// but today, LoadPackages calls WriteGoMod unconditionally, which
+						// would fail with a less clear message.
+						base.Errorf("go: %[1]s: package %[2]s imported from implicitly required module; to add missing requirements, run:\n\tgo get %[2]s@%[3]s", pkg.path, dep.path, dep.mod.Version)
+					}
 					ld.direct[dep.mod.Path] = true
 				}
 			}
 		}
 	}
+	base.ExitIfErrors()
 
 	// If we didn't scan all of the imports from the main module, or didn't use
 	// imports.AnyTags, then we didn't necessarily load every package that

@@ -1,6 +1,6 @@
 // basic_ios member functions -*- C++ -*-
 
-// Copyright (C) 1999-2020 Free Software Foundation, Inc.
+// Copyright (C) 1999-2021 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -64,7 +64,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     {
       // _GLIBCXX_RESOLVE_LIB_DEFECTS
       // 292. effects of a.copyfmt (a)
-      if (this != &__rhs)
+      if (this != std::__addressof(__rhs))
 	{
 	  // Per 27.1.1, do not call imbue, yet must trash all caches
 	  // associated with imbue()

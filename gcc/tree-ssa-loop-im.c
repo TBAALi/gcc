@@ -1,5 +1,5 @@
 /* Loop invariant motion.
-   Copyright (C) 2003-2020 Free Software Foundation, Inc.
+   Copyright (C) 2003-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -2508,6 +2508,7 @@ hoist_memory_references (class loop *loop, bitmap mem_refs,
       if (res != 1)
 	{
 	  bitmap_copy (refs_not_supported, mem_refs);
+	  seq.release ();
 	  break;
 	}
       sms.safe_push (std::make_pair (e, seq));

@@ -1,5 +1,5 @@
 /* Subroutines used for code generation on IBM RS/6000.
-   Copyright (C) 1991-2020 Free Software Foundation, Inc.
+   Copyright (C) 1991-2021 Free Software Foundation, Inc.
    Contributed by Richard Kenner (kenner@vlsi1.ultra.nyu.edu)
 
    This file is part of GCC.
@@ -1055,7 +1055,7 @@ struct processor_costs power8_cost = {
   COSTS_N_INSNS (17),	/* ddiv */
   128,			/* cache line size */
   32,			/* l1 cache */
-  256,			/* l2 cache */
+  512,			/* l2 cache */
   12,			/* prefetch streams */
   COSTS_N_INSNS (3),	/* SF->DF convert */
 };
@@ -1078,6 +1078,26 @@ struct processor_costs power9_cost = {
   512,			/* l2 cache */
   8,			/* prefetch streams */
   COSTS_N_INSNS (3),	/* SF->DF convert */
+};
+
+/* Instruction costs on POWER10 processors.  */
+static const
+struct processor_costs power10_cost = {
+  COSTS_N_INSNS (2),	/* mulsi */
+  COSTS_N_INSNS (2),	/* mulsi_const */
+  COSTS_N_INSNS (2),	/* mulsi_const9 */
+  COSTS_N_INSNS (2),	/* muldi */
+  COSTS_N_INSNS (6),	/* divsi */
+  COSTS_N_INSNS (6),	/* divdi */
+  COSTS_N_INSNS (2),	/* fp */
+  COSTS_N_INSNS (2),	/* dmul */
+  COSTS_N_INSNS (11),	/* sdiv */
+  COSTS_N_INSNS (13),	/* ddiv */
+  128,			/* cache line size */
+  32,			/* l1 cache */
+  512,			/* l2 cache */
+  16,			/* prefetch streams */
+  COSTS_N_INSNS (2),	/* SF->DF convert */
 };
 
 /* Instruction costs on POWER A2 processors.  */
@@ -1173,7 +1193,6 @@ static bool rs6000_secondary_reload_move (enum rs6000_reg_type,
 					  machine_mode,
 					  secondary_reload_info *,
 					  bool);
-static enum non_prefixed_form reg_to_non_prefixed (rtx reg, machine_mode mode);
 rtl_opt_pass *make_pass_analyze_swaps (gcc::context*);
 
 /* Hash table stuff for keeping track of TOC entries.  */
@@ -1321,6 +1340,10 @@ static const struct attribute_spec rs6000_attribute_table[] =
 #undef TARGET_ASM_ASSEMBLE_VISIBILITY
 #define TARGET_ASM_ASSEMBLE_VISIBILITY rs6000_assemble_visibility
 #endif
+
+#undef TARGET_ASM_PRINT_PATCHABLE_FUNCTION_ENTRY
+#define TARGET_ASM_PRINT_PATCHABLE_FUNCTION_ENTRY \
+  rs6000_print_patchable_function_entry
 
 #undef TARGET_SET_UP_BY_PROLOGUE
 #define TARGET_SET_UP_BY_PROLOGUE rs6000_set_up_by_prologue
@@ -1545,6 +1568,10 @@ static const struct attribute_spec rs6000_attribute_table[] =
 
 #undef TARGET_SCALAR_MODE_SUPPORTED_P
 #define TARGET_SCALAR_MODE_SUPPORTED_P rs6000_scalar_mode_supported_p
+
+#undef TARGET_LIBGCC_FLOATING_MODE_SUPPORTED_P
+#define TARGET_LIBGCC_FLOATING_MODE_SUPPORTED_P \
+  rs6000_libgcc_floating_mode_supported_p
 
 #undef TARGET_VECTOR_MODE_SUPPORTED_P
 #define TARGET_VECTOR_MODE_SUPPORTED_P rs6000_vector_mode_supported_p
@@ -2512,6 +2539,9 @@ rs6000_debug_reg_global (void)
   if (rs6000_altivec_abi)
     fprintf (stderr, DEBUG_FMT_S, "altivec_abi", "true");
 
+  if (rs6000_aix_extabi)
+    fprintf (stderr, DEBUG_FMT_S, "AIX vec-extabi", "true");
+
   if (rs6000_darwin64_abi)
     fprintf (stderr, DEBUG_FMT_S, "darwin64_abi", "true");
 
@@ -3410,9 +3440,10 @@ rs6000_builtin_mask_calculate (void)
    not such a great idea.  */
 
 static rtx_insn *
-rs6000_md_asm_adjust (vec<rtx> &/*outputs*/, vec<rtx> &/*inputs*/,
-		      vec<const char *> &/*constraints*/,
-		      vec<rtx> &clobbers, HARD_REG_SET &clobbered_regs)
+rs6000_md_asm_adjust (vec<rtx> & /*outputs*/, vec<rtx> & /*inputs*/,
+		      vec<machine_mode> & /*input_modes*/,
+		      vec<const char *> & /*constraints*/, vec<rtx> &clobbers,
+		      HARD_REG_SET &clobbered_regs)
 {
   clobbers.safe_push (gen_rtx_REG (SImode, CA_REGNO));
   SET_HARD_REG_BIT (clobbered_regs, CA_REGNO);
@@ -4430,6 +4461,16 @@ rs6000_option_override_internal (bool global_init_p)
   if (TARGET_POWER10 && (rs6000_isa_flags_explicit & OPTION_MASK_MMA) == 0)
     rs6000_isa_flags |= OPTION_MASK_MMA;
 
+  if (TARGET_POWER10 && (rs6000_isa_flags_explicit & OPTION_MASK_P10_FUSION) == 0)
+    rs6000_isa_flags |= OPTION_MASK_P10_FUSION;
+
+  if (TARGET_POWER10 &&
+      (rs6000_isa_flags_explicit & OPTION_MASK_P10_FUSION_LD_CMPI) == 0)
+    rs6000_isa_flags |= OPTION_MASK_P10_FUSION_LD_CMPI;
+
+  if (TARGET_POWER10 && (rs6000_isa_flags_explicit & OPTION_MASK_P10_FUSION_2LOGICAL) == 0)
+    rs6000_isa_flags |= OPTION_MASK_P10_FUSION_2LOGICAL;
+
   /* Turn off vector pair/mma options on non-power10 systems.  */
   else if (!TARGET_POWER10 && TARGET_MMA)
     {
@@ -4438,6 +4479,9 @@ rs6000_option_override_internal (bool global_init_p)
 
       rs6000_isa_flags &= ~OPTION_MASK_MMA;
     }
+
+  if (!TARGET_PCREL && TARGET_PCREL_OPT)
+    rs6000_isa_flags &= ~OPTION_MASK_PCREL_OPT;
 
   if (TARGET_DEBUG_REG || TARGET_DEBUG_TARGET)
     rs6000_print_isa_options (stderr, 0, "after subtarget", rs6000_isa_flags);
@@ -4758,8 +4802,11 @@ rs6000_option_override_internal (bool global_init_p)
 	break;
 
       case PROCESSOR_POWER9:
-      case PROCESSOR_POWER10:
 	rs6000_cost = &power9_cost;
+	break;
+
+      case PROCESSOR_POWER10:
+	rs6000_cost = &power10_cost;
 	break;
 
       case PROCESSOR_PPCA2:
@@ -5188,6 +5235,11 @@ typedef struct _rs6000_cost_data
 {
   struct loop *loop_info;
   unsigned cost[3];
+  /* For each vectorized loop, this var holds TRUE iff a non-memory vector
+     instruction is needed by the vectorization.  */
+  bool vect_nonmem;
+  /* Indicates this is costing for the scalar version of a loop or block.  */
+  bool costing_for_scalar;
 } rs6000_cost_data;
 
 /* Test for likely overcommitment of vector hardware resources.  If a
@@ -5208,6 +5260,12 @@ rs6000_density_test (rs6000_cost_data *data)
   loop_vec_info loop_vinfo = loop_vec_info_for_loop (data->loop_info);
   int vec_cost = data->cost[vect_body], not_vec_cost = 0;
   int i, density_pct;
+
+  /* This density test only cares about the cost of vector version of the
+     loop, so immediately return if we are passed costing for the scalar
+     version (namely computing single scalar iteration cost).  */
+  if (data->costing_for_scalar)
+    return;
 
   for (i = 0; i < nbbs; i++)
     {
@@ -5245,19 +5303,16 @@ rs6000_density_test (rs6000_cost_data *data)
 
 /* Implement targetm.vectorize.init_cost.  */
 
-/* For each vectorized loop, this var holds TRUE iff a non-memory vector
-   instruction is needed by the vectorization.  */
-static bool rs6000_vect_nonmem;
-
 static void *
-rs6000_init_cost (struct loop *loop_info)
+rs6000_init_cost (struct loop *loop_info, bool costing_for_scalar)
 {
   rs6000_cost_data *data = XNEW (struct _rs6000_cost_data);
   data->loop_info = loop_info;
   data->cost[vect_prologue] = 0;
   data->cost[vect_body]     = 0;
   data->cost[vect_epilogue] = 0;
-  rs6000_vect_nonmem = false;
+  data->vect_nonmem = false;
+  data->costing_for_scalar = costing_for_scalar;
   return data;
 }
 
@@ -5317,7 +5372,7 @@ rs6000_add_stmt_cost (class vec_info *vinfo, void *data, int count,
 	   || kind == vec_promote_demote || kind == vec_construct
 	   || kind == scalar_to_vec)
 	  || (where == vect_body && kind == vector_stmt))
-	rs6000_vect_nonmem = true;
+	cost_data->vect_nonmem = true;
     }
 
   return retval;
@@ -5372,7 +5427,7 @@ rs6000_finish_cost (void *data, unsigned *prologue_cost,
   if (cost_data->loop_info)
     {
       loop_vec_info vec_info = loop_vec_info_for_loop (cost_data->loop_info);
-      if (!rs6000_vect_nonmem
+      if (!cost_data->vect_nonmem
 	  && LOOP_VINFO_VECT_FACTOR (vec_info) == 2
 	  && LOOP_REQUIRES_VERSIONING (vec_info))
 	cost_data->cost[vect_body] += 10000;
@@ -5722,7 +5777,7 @@ rs6000_machine_from_flags (void)
   HOST_WIDE_INT flags = rs6000_isa_flags;
 
   /* Disable the flags that should never influence the .machine selection.  */
-  flags &= ~(OPTION_MASK_PPC_GFXOPT | OPTION_MASK_PPC_GPOPT);
+  flags &= ~(OPTION_MASK_PPC_GFXOPT | OPTION_MASK_PPC_GPOPT | OPTION_MASK_ISEL);
 
   if ((flags & (ISA_3_1_MASKS_SERVER & ~ISA_3_0_MASKS_SERVER)) != 0)
     return "power10";
@@ -6977,6 +7032,202 @@ rs6000_expand_vector_init (rtx target, rtx vals)
   emit_move_insn (target, mem);
 }
 
+/* Insert VAL into IDX of TARGET, VAL size is same of the vector element, IDX
+   is variable and also counts by vector element size for p9 and above.  */
+
+static void
+rs6000_expand_vector_set_var_p9 (rtx target, rtx val, rtx idx)
+{
+  machine_mode mode = GET_MODE (target);
+
+  gcc_assert (VECTOR_MEM_VSX_P (mode) && !CONST_INT_P (idx));
+
+  machine_mode inner_mode = GET_MODE (val);
+
+  int width = GET_MODE_SIZE (inner_mode);
+
+  gcc_assert (width >= 1 && width <= 8);
+
+  int shift = exact_log2 (width);
+
+  machine_mode idx_mode = GET_MODE (idx);
+
+  machine_mode shift_mode;
+  rtx (*gen_ashl)(rtx, rtx, rtx);
+  rtx (*gen_lvsl)(rtx, rtx);
+  rtx (*gen_lvsr)(rtx, rtx);
+
+  if (TARGET_POWERPC64)
+    {
+      shift_mode = DImode;
+      gen_ashl = gen_ashldi3;
+      gen_lvsl = gen_altivec_lvsl_reg_di;
+      gen_lvsr = gen_altivec_lvsr_reg_di;
+    }
+  else
+    {
+      shift_mode = SImode;
+      gen_ashl = gen_ashlsi3;
+      gen_lvsl = gen_altivec_lvsl_reg_si;
+      gen_lvsr = gen_altivec_lvsr_reg_si;
+    }
+  /* Generate the IDX for permute shift, width is the vector element size.
+     idx = idx * width.  */
+  rtx tmp = gen_reg_rtx (shift_mode);
+  idx = convert_modes (shift_mode, idx_mode, idx, 1);
+
+  emit_insn (gen_ashl (tmp, idx, GEN_INT (shift)));
+
+  /*  lvsr    v1,0,idx.  */
+  rtx pcvr = gen_reg_rtx (V16QImode);
+  emit_insn (gen_lvsr (pcvr, tmp));
+
+  /*  lvsl    v2,0,idx.  */
+  rtx pcvl = gen_reg_rtx (V16QImode);
+  emit_insn (gen_lvsl (pcvl, tmp));
+
+  rtx sub_target = simplify_gen_subreg (V16QImode, target, mode, 0);
+
+  rtx permr
+    = gen_altivec_vperm_v8hiv16qi (sub_target, sub_target, sub_target, pcvr);
+  emit_insn (permr);
+
+  rs6000_expand_vector_set (target, val, const0_rtx);
+
+  rtx perml
+    = gen_altivec_vperm_v8hiv16qi (sub_target, sub_target, sub_target, pcvl);
+  emit_insn (perml);
+}
+
+/* Insert VAL into IDX of TARGET, VAL size is same of the vector element, IDX
+   is variable and also counts by vector element size for p7 & p8.  */
+
+static void
+rs6000_expand_vector_set_var_p7 (rtx target, rtx val, rtx idx)
+{
+  machine_mode mode = GET_MODE (target);
+
+  gcc_assert (VECTOR_MEM_VSX_P (mode) && !CONST_INT_P (idx));
+
+  machine_mode inner_mode = GET_MODE (val);
+  HOST_WIDE_INT mode_mask = GET_MODE_MASK (inner_mode);
+
+  int width = GET_MODE_SIZE (inner_mode);
+  gcc_assert (width >= 1 && width <= 4);
+
+  int shift = exact_log2 (width);
+
+  machine_mode idx_mode = GET_MODE (idx);
+
+  machine_mode shift_mode;
+  rtx (*gen_ashl)(rtx, rtx, rtx);
+  rtx (*gen_add)(rtx, rtx, rtx);
+  rtx (*gen_sub)(rtx, rtx, rtx);
+  rtx (*gen_lvsl)(rtx, rtx);
+
+  if (TARGET_POWERPC64)
+    {
+      shift_mode = DImode;
+      gen_ashl = gen_ashldi3;
+      gen_add = gen_adddi3;
+      gen_sub = gen_subdi3;
+      gen_lvsl = gen_altivec_lvsl_reg_di;
+    }
+  else
+    {
+      shift_mode = SImode;
+      gen_ashl = gen_ashlsi3;
+      gen_add = gen_addsi3;
+      gen_sub = gen_subsi3;
+      gen_lvsl = gen_altivec_lvsl_reg_si;
+    }
+
+  /*  idx = idx * width.  */
+  rtx tmp = gen_reg_rtx (shift_mode);
+  idx = convert_modes (shift_mode, idx_mode, idx, 1);
+
+  emit_insn (gen_ashl (tmp, idx, GEN_INT (shift)));
+
+  /*  For LE:  idx = idx + 8.  */
+  if (!BYTES_BIG_ENDIAN)
+    emit_insn (gen_add (tmp, tmp, GEN_INT (8)));
+  else
+    emit_insn (gen_sub (tmp, GEN_INT (24 - width), tmp));
+
+  /*  lxv vs33, mask.
+      DImode: 0xffffffffffffffff0000000000000000
+      SImode: 0x00000000ffffffff0000000000000000
+      HImode: 0x000000000000ffff0000000000000000.
+      QImode: 0x00000000000000ff0000000000000000.  */
+  rtx mask = gen_reg_rtx (V16QImode);
+  rtx mask_v2di = gen_reg_rtx (V2DImode);
+  rtvec v = rtvec_alloc (2);
+  if (!BYTES_BIG_ENDIAN)
+    {
+      RTVEC_ELT (v, 0) = gen_rtx_CONST_INT (DImode, 0);
+      RTVEC_ELT (v, 1) = gen_rtx_CONST_INT (DImode, mode_mask);
+    }
+  else
+    {
+      RTVEC_ELT (v, 0) = gen_rtx_CONST_INT (DImode, mode_mask);
+      RTVEC_ELT (v, 1) = gen_rtx_CONST_INT (DImode, 0);
+    }
+  emit_insn (gen_vec_initv2didi (mask_v2di, gen_rtx_PARALLEL (V2DImode, v)));
+  rtx sub_mask = simplify_gen_subreg (V16QImode, mask_v2di, V2DImode, 0);
+  emit_insn (gen_rtx_SET (mask, sub_mask));
+
+  /*  mtvsrd[wz] f0,tmp_val.  */
+  rtx tmp_val = gen_reg_rtx (SImode);
+  if (inner_mode == E_SFmode)
+    if (TARGET_DIRECT_MOVE_64BIT)
+      emit_insn (gen_movsi_from_sf (tmp_val, val));
+    else
+      {
+	rtx stack = rs6000_allocate_stack_temp (SFmode, false, true);
+	emit_insn (gen_movsf_hardfloat (stack, val));
+	rtx stack2 = copy_rtx (stack);
+	PUT_MODE (stack2, SImode);
+	emit_move_insn (tmp_val, stack2);
+      }
+  else
+    tmp_val = force_reg (SImode, val);
+
+  rtx val_v16qi = gen_reg_rtx (V16QImode);
+  rtx val_v2di = gen_reg_rtx (V2DImode);
+  rtvec vec_val = rtvec_alloc (2);
+  if (!BYTES_BIG_ENDIAN)
+  {
+    RTVEC_ELT (vec_val, 0) = gen_rtx_CONST_INT (DImode, 0);
+    RTVEC_ELT (vec_val, 1) = tmp_val;
+  }
+  else
+  {
+    RTVEC_ELT (vec_val, 0) = tmp_val;
+    RTVEC_ELT (vec_val, 1) = gen_rtx_CONST_INT (DImode, 0);
+  }
+  emit_insn (
+    gen_vec_initv2didi (val_v2di, gen_rtx_PARALLEL (V2DImode, vec_val)));
+  rtx sub_val = simplify_gen_subreg (V16QImode, val_v2di, V2DImode, 0);
+  emit_insn (gen_rtx_SET (val_v16qi, sub_val));
+
+  /*  lvsl    13,0,idx.  */
+  rtx pcv = gen_reg_rtx (V16QImode);
+  emit_insn (gen_lvsl (pcv, tmp));
+
+  /*  vperm 1,1,1,13.  */
+  /*  vperm 0,0,0,13.  */
+  rtx val_perm = gen_reg_rtx (V16QImode);
+  rtx mask_perm = gen_reg_rtx (V16QImode);
+  emit_insn (gen_altivec_vperm_v8hiv16qi (val_perm, val_v16qi, val_v16qi, pcv));
+  emit_insn (gen_altivec_vperm_v8hiv16qi (mask_perm, mask, mask, pcv));
+
+  rtx target_v16qi = simplify_gen_subreg (V16QImode, target, mode, 0);
+
+  /*  xxsel 34,34,32,33.  */
+  emit_insn (
+    gen_vector_select_v16qi (target_v16qi, target_v16qi, val_perm, mask_perm));
+}
+
 /* Set field ELT_RTX of TARGET to VAL.  */
 
 void
@@ -6993,6 +7244,24 @@ rs6000_expand_vector_set (rtx target, rtx val, rtx elt_rtx)
 
   if (VECTOR_MEM_VSX_P (mode))
     {
+      if (!CONST_INT_P (elt_rtx))
+	{
+	  /* For V2DI/V2DF, could leverage the P9 version to generate xxpermdi
+	     when elt_rtx is variable.  */
+	  if ((TARGET_P9_VECTOR && TARGET_POWERPC64) || width == 8)
+	    {
+	      rs6000_expand_vector_set_var_p9 (target, val, elt_rtx);
+	      return;
+	    }
+	  else if (TARGET_VSX)
+	    {
+	      rs6000_expand_vector_set_var_p7 (target, val, elt_rtx);
+	      return;
+	    }
+	  else
+	    gcc_assert (CONST_INT_P (elt_rtx));
+	}
+
       rtx insn = NULL_RTX;
 
       if (mode == V2DFmode)
@@ -7019,8 +7288,6 @@ rs6000_expand_vector_set (rtx target, rtx val, rtx elt_rtx)
 	  return;
 	}
     }
-
-  gcc_assert (CONST_INT_P (elt_rtx));
 
   /* Simplify setting single element vectors like V1TImode.  */
   if (GET_MODE_SIZE (mode) == GET_MODE_SIZE (inner_mode)
@@ -7655,31 +7922,91 @@ rs6000_special_adjust_field_align_p (tree type, unsigned int computed)
   return false;
 }
 
-/* AIX increases natural record alignment to doubleword if the first
-   field is an FP double while the FP fields remain word aligned.  */
+/* AIX word-aligns FP doubles but doubleword-aligns 64-bit ints.  */
+
+unsigned int
+rs6000_special_adjust_field_align (tree type, unsigned int computed)
+{
+  if (computed <= 32)
+    return computed;
+
+  /* Strip initial arrays.  */
+  while (TREE_CODE (type) == ARRAY_TYPE)
+    type = TREE_TYPE (type);
+
+  /* If RECORD or UNION, recursively find the first field. */
+  while (AGGREGATE_TYPE_P (type))
+    {
+      tree field = TYPE_FIELDS (type);
+
+      /* Skip all non field decls */
+      while (field != NULL
+	     && (TREE_CODE (field) != FIELD_DECL
+		 || DECL_FIELD_ABI_IGNORED (field)))
+	field = DECL_CHAIN (field);
+
+      if (! field)
+	break;
+
+      /* A packed field does not contribute any extra alignment.  */
+      if (DECL_PACKED (field))
+	return computed;
+
+      type = TREE_TYPE (field);
+
+      /* Strip arrays.  */
+      while (TREE_CODE (type) == ARRAY_TYPE)
+	type = TREE_TYPE (type);
+    }
+
+  if (! AGGREGATE_TYPE_P (type) && type != error_mark_node
+      && (TYPE_MODE (type) == DFmode || TYPE_MODE (type) == DCmode))
+    computed = MIN (computed, 32);
+
+  return computed;
+}
+
+/* AIX increases natural record alignment to doubleword if the innermost first
+   field is an FP double while the FP fields remain word aligned.
+   Only called if TYPE initially is a RECORD or UNION.  */
 
 unsigned int
 rs6000_special_round_type_align (tree type, unsigned int computed,
 				 unsigned int specified)
 {
   unsigned int align = MAX (computed, specified);
-  tree field = TYPE_FIELDS (type);
 
-  /* Skip all non field decls */
-  while (field != NULL
-	 && (TREE_CODE (field) != FIELD_DECL
-	     || DECL_FIELD_ABI_IGNORED (field)))
-    field = DECL_CHAIN (field);
+  if (TYPE_PACKED (type) || align >= 64)
+    return align;
 
-  if (field != NULL && field != type)
+  /* If RECORD or UNION, recursively find the first field. */
+  do
     {
+      tree field = TYPE_FIELDS (type);
+
+      /* Skip all non field decls */
+      while (field != NULL
+	     && (TREE_CODE (field) != FIELD_DECL
+		 || DECL_FIELD_ABI_IGNORED (field)))
+	field = DECL_CHAIN (field);
+
+      if (! field)
+	break;
+
+      /* A packed field does not contribute any extra alignment.  */
+      if (DECL_PACKED (field))
+	return align;
+
       type = TREE_TYPE (field);
+
+      /* Strip arrays.  */
       while (TREE_CODE (type) == ARRAY_TYPE)
 	type = TREE_TYPE (type);
+    } while (AGGREGATE_TYPE_P (type));
 
-      if (type != error_mark_node && TYPE_MODE (type) == DFmode)
-	align = MAX (align, 64);
-    }
+  if (! AGGREGATE_TYPE_P (type) && type != error_mark_node
+      && (TYPE_MODE (type) == DFmode || TYPE_MODE (type) == DCmode))
+    align = MAX (align, 64);
 
   return align;
 }
@@ -8769,26 +9096,6 @@ rs6000_output_dwarf_dtprel (FILE *file, int size, rtx x)
   output_addr_const (file, x);
   if (TARGET_ELF)
     fputs ("@dtprel+0x8000", file);
-  else if (TARGET_XCOFF && SYMBOL_REF_P (x))
-    {
-      switch (SYMBOL_REF_TLS_MODEL (x))
-	{
-	case 0:
-	  break;
-	case TLS_MODEL_LOCAL_EXEC:
-	  fputs ("@le", file);
-	  break;
-	case TLS_MODEL_INITIAL_EXEC:
-	  fputs ("@ie", file);
-	  break;
-	case TLS_MODEL_GLOBAL_DYNAMIC:
-	case TLS_MODEL_LOCAL_DYNAMIC:
-	  fputs ("@m", file);
-	  break;
-	default:
-	  gcc_unreachable ();
-	}
-    }
 }
 
 /* Return true if X is a symbol that refers to real (rather than emulated)
@@ -8810,8 +9117,57 @@ rs6000_delegitimize_address (rtx orig_x)
 {
   rtx x, y, offset;
 
-  if (GET_CODE (orig_x) == UNSPEC && XINT (orig_x, 1) == UNSPEC_FUSION_GPR)
-    orig_x = XVECEXP (orig_x, 0, 0);
+  /* UNSPEC_FUSION_GPR is created by the peephole2 for power8 fusion.  It
+     encodes loading up the high part of the address of a TOC reference along
+     with a load of a GPR using the same base register used for the load.  We
+     return the original SYMBOL_REF.
+
+	(set (reg:INT1 <reg>
+	     (unspec:INT1 [<combined-address>] UNSPEC_FUSION_GPR)))
+
+     UNSPEC_PCREL_OPT_LD_ADDR is used by the power10 PCREL_OPT pass.  These
+     UNSPECs include the external SYMBOL_REF along with the value being loaded.
+     We return the original SYMBOL_REF.
+
+	(parallel [(set (reg:DI <base-reg>)
+			(unspec:DI [(symbol_ref <symbol>)
+				    (const_int <marker>)]
+				   UNSPEC_PCREL_OPT_LD_ADDR))
+		   (set (reg:DI <load-reg>)
+			(unspec:DI [(const_int 0)]
+				   UNSPEC_PCREL_OPT_LD_DATA))])
+
+     UNSPEC_PCREL_OPT_LD_SAME_REG is an alternative that is used if the
+     GPR being loaded is the same as the GPR used to hold the external address.
+
+	(set (reg:DI <base-reg>)
+	     (unspec:DI [(symbol_ref <symbol>)
+			 (const_int <marker>)]
+			UNSPEC_PCREL_OPT_LD_SAME_REG))
+
+     UNSPEC_PCREL_OPT_ST_ADDR is used by the power10 PCREL_OPT pass.  This
+     UNSPEC include the external SYMBOL_REF along with the value being loaded.
+     We return the original SYMBOL_REF.
+
+	(parallel [(set (reg:DI <base-reg>)
+			(unspec:DI [(symbol_ref <symbol>)
+				    (const_int <marker>)]
+				   UNSPEC_PCREL_OPT_ST_ADDR))
+		   (use (reg <store-reg>))])  */
+
+  if (GET_CODE (orig_x) == UNSPEC)
+    switch (XINT (orig_x, 1))
+      {
+      case UNSPEC_FUSION_GPR:
+      case UNSPEC_PCREL_OPT_LD_ADDR:
+      case UNSPEC_PCREL_OPT_LD_SAME_REG:
+      case UNSPEC_PCREL_OPT_ST_ADDR:
+	orig_x = XVECEXP (orig_x, 0, 0);
+	break;
+
+      default:
+	break;
+      }
 
   orig_x = delegitimize_mem_from_attrs (orig_x);
 
@@ -8963,29 +9319,12 @@ rs6000_got_sym (void)
 static rtx
 rs6000_legitimize_tls_address_aix (rtx addr, enum tls_model model)
 {
-  rtx sym, mem, tocref, tlsreg, tmpreg, dest, tlsaddr;
+  rtx sym, mem, tocref, tlsreg, tmpreg, dest;
   const char *name;
   char *tlsname;
 
-  name = XSTR (addr, 0);
-  /* Append TLS CSECT qualifier, unless the symbol already is qualified
-     or the symbol will be in TLS private data section.  */
-  if (name[strlen (name) - 1] != ']'
-      && (TREE_PUBLIC (SYMBOL_REF_DECL (addr))
-	  || bss_initializer_p (SYMBOL_REF_DECL (addr))))
-    {
-      tlsname = XALLOCAVEC (char, strlen (name) + 4);
-      strcpy (tlsname, name);
-      strcat (tlsname,
-	      bss_initializer_p (SYMBOL_REF_DECL (addr)) ? "[UL]" : "[TL]");
-      tlsaddr = copy_rtx (addr);
-      XSTR (tlsaddr, 0) = ggc_strdup (tlsname);
-    }
-  else
-    tlsaddr = addr;
-
   /* Place addr into TOC constant pool.  */
-  sym = force_const_mem (GET_MODE (tlsaddr), tlsaddr);
+  sym = force_const_mem (GET_MODE (addr), addr);
 
   /* Output the TOC entry and create the MEM referencing the value.  */
   if (constant_pool_expr_p (XEXP (sym, 0))
@@ -9264,7 +9603,8 @@ rs6000_cannot_force_const_mem (machine_mode mode ATTRIBUTE_UNUSED, rtx x)
       && SYMBOL_REF_TLS_MODEL (XEXP (XEXP (x, 0), 0)) != 0)
     return true;
 
-  /* Do not place an ELF TLS symbol in the constant pool.  */
+  /* Allow AIX TOC TLS symbols in the constant pool,
+     but not ELF TLS symbols.  */
   return TARGET_ELF && tls_referenced_p (x);
 }
 
@@ -9646,7 +9986,7 @@ rs6000_conditional_register_usage (void)
 	call_used_regs[i] = 1;
 
       /* AIX reserves VR20:31 in non-extended ABI mode.  */
-      if (TARGET_XCOFF)
+      if (TARGET_XCOFF && !rs6000_aix_extabi)
 	for (i = FIRST_ALTIVEC_REGNO + 20; i < FIRST_ALTIVEC_REGNO + 32; ++i)
 	  fixed_regs[i] = call_used_regs[i] = 1;
     }
@@ -9884,6 +10224,9 @@ rs6000_const_vec (machine_mode mode)
 void
 rs6000_emit_le_vsx_permute (rtx dest, rtx source, machine_mode mode)
 {
+  gcc_assert (!altivec_indexed_or_indirect_operand (dest, mode));
+  gcc_assert (!altivec_indexed_or_indirect_operand (source, mode));
+
   /* Scalar permutations are easier to express in integer modes rather than
      floating-point modes, so cast them here.  We use V1TImode instead
      of TImode to ensure that the values don't go through GPRs.  */
@@ -9932,10 +10275,8 @@ rs6000_emit_le_vsx_load (rtx dest, rtx source, machine_mode mode)
 void
 rs6000_emit_le_vsx_store (rtx dest, rtx source, machine_mode mode)
 {
-  /* This should never be called during or after LRA, because it does
-     not re-permute the source register.  It is intended only for use
-     during expand.  */
-  gcc_assert (!lra_in_progress && !reload_completed);
+  /* This should never be called after LRA.  */
+  gcc_assert (can_create_pseudo_p ());
 
   /* Use V2DImode to do swaps of types with 128-bit scalar parts (TImode,
      V1TImode).  */
@@ -9946,7 +10287,7 @@ rs6000_emit_le_vsx_store (rtx dest, rtx source, machine_mode mode)
       source = gen_lowpart (V2DImode, source);
     }
 
-  rtx tmp = can_create_pseudo_p () ? gen_reg_rtx_and_attrs (source) : source;
+  rtx tmp = gen_reg_rtx_and_attrs (source);
   rs6000_emit_le_vsx_permute (tmp, source, mode);
   rs6000_emit_le_vsx_permute (dest, tmp, mode);
 }
@@ -10327,7 +10668,7 @@ rs6000_emit_move (rtx dest, rtx source, machine_mode mode)
     case E_OOmode:
     case E_XOmode:
       if (CONST_INT_P (operands[1]) && INTVAL (operands[1]) != 0)
-	error ("%qs is an opaque type, and you can't set it to other values.",
+	error ("%qs is an opaque type, and you cannot set it to other values",
 	       (mode == OOmode) ? "__vector_pair" : "__vector_quad");
       break;
 
@@ -14354,6 +14695,30 @@ rs6000_assemble_visibility (tree decl, int vis)
 }
 #endif
 
+/* Write PATCH_AREA_SIZE NOPs into the asm outfile FILE around a function
+   entry.  If RECORD_P is true and the target supports named sections,
+   the location of the NOPs will be recorded in a special object section
+   called "__patchable_function_entries".  This routine may be called
+   twice per function to put NOPs before and after the function
+   entry.  */
+
+void
+rs6000_print_patchable_function_entry (FILE *file,
+				       unsigned HOST_WIDE_INT patch_area_size,
+				       bool record_p)
+{
+  unsigned int flags = SECTION_WRITE | SECTION_RELRO;
+  /* When .opd section is emitted, the function symbol
+     default_print_patchable_function_entry_1 is emitted into the .opd section
+     while the patchable area is emitted into the function section.
+     Don't use SECTION_LINK_ORDER in that case.  */
+  if (!(TARGET_64BIT && DEFAULT_ABI != ABI_ELFv2)
+      && HAVE_GAS_SECTION_LINK_ORDER)
+    flags |= SECTION_LINK_ORDER;
+  default_print_patchable_function_entry_1 (file, patch_area_size, record_p,
+					    flags);
+}
+
 enum rtx_code
 rs6000_reverse_condition (machine_mode mode, enum rtx_code code)
 {
@@ -18214,8 +18579,9 @@ rs6000_issue_rate (void)
   case PROCESSOR_POWER8:
     return 7;
   case PROCESSOR_POWER9:
-  case PROCESSOR_POWER10:
     return 6;
+  case PROCESSOR_POWER10:
+    return 8;
   default:
     return 1;
   }
@@ -19799,7 +20165,7 @@ rs6000_handle_altivec_attribute (tree *node,
   else if (TREE_CODE (type) == COMPLEX_TYPE)
     error ("use of %<complex%> in AltiVec types is invalid");
   else if (DECIMAL_FLOAT_MODE_P (mode))
-    error ("use of decimal floating point types in AltiVec types is invalid");
+    error ("use of decimal floating-point types in AltiVec types is invalid");
   else if (!TARGET_VSX)
     {
       if (type == long_unsigned_type_node || type == long_integer_type_node)
@@ -20863,10 +21229,11 @@ rs6000_xcoff_asm_named_section (const char *name, unsigned int flags,
 				tree decl ATTRIBUTE_UNUSED)
 {
   int smclass;
-  static const char * const suffix[5] = { "PR", "RO", "RW", "TL", "XO" };
+  static const char * const suffix[7]
+    = { "PR", "RO", "RW", "BS", "TL", "UL", "XO" };
 
   if (flags & SECTION_EXCLUDE)
-    smclass = 4;
+    smclass = 6;
   else if (flags & SECTION_DEBUG)
     {
       fprintf (asm_out_file, "\t.dwsect %s\n", name);
@@ -20875,9 +21242,19 @@ rs6000_xcoff_asm_named_section (const char *name, unsigned int flags,
   else if (flags & SECTION_CODE)
     smclass = 0;
   else if (flags & SECTION_TLS)
-    smclass = 3;
+    {
+      if (flags & SECTION_BSS)
+	smclass = 5;
+      else
+	smclass = 4;
+    }
   else if (flags & SECTION_WRITE)
-    smclass = 2;
+    {
+      if (flags & SECTION_BSS)
+	smclass = 3;
+      else
+	smclass = 2;
+    }
   else
     smclass = 1;
 
@@ -20915,14 +21292,10 @@ rs6000_xcoff_select_section (tree decl, int reloc,
 #if HAVE_AS_TLS
       if (TREE_CODE (decl) == VAR_DECL && DECL_THREAD_LOCAL_P (decl))
 	{
-	  if (TREE_PUBLIC (decl))
+	  if (bss_initializer_p (decl))
+	    return tls_comm_section;
+	  else if (TREE_PUBLIC (decl))
 	    return tls_data_section;
-	  else if (bss_initializer_p (decl))
-	    {
-	      /* Convert to COMMON to emit in BSS.  */
-	      DECL_COMMON (decl) = 1;
-	      return tls_comm_section;
-	    }
 	  else
 	    return tls_private_data_section;
 	}
@@ -20939,17 +21312,6 @@ static void
 rs6000_xcoff_unique_section (tree decl, int reloc ATTRIBUTE_UNUSED)
 {
   const char *name;
-
-  /* Use select_section for private data and uninitialized data with
-     alignment <= BIGGEST_ALIGNMENT.  */
-  if (!TREE_PUBLIC (decl)
-      || DECL_COMMON (decl)
-      || (DECL_INITIAL (decl) == NULL_TREE
-	  && DECL_ALIGN (decl) <= BIGGEST_ALIGNMENT)
-      || DECL_INITIAL (decl) == error_mark_node
-      || (flag_zero_initialized_in_bss
-	  && initializer_zerop (DECL_INITIAL (decl))))
-    return;
 
   name = IDENTIFIER_POINTER (DECL_ASSEMBLER_NAME (decl));
   name = (*targetm.strip_name_encoding) (name);
@@ -20995,6 +21357,9 @@ rs6000_xcoff_section_type_flags (tree decl, const char *name, int reloc)
   unsigned int align;
   unsigned int flags = default_section_type_flags (decl, name, reloc);
 
+  if (decl && DECL_P (decl) && VAR_P (decl) && bss_initializer_p (decl))
+    flags |= SECTION_BSS;
+
   /* Align to at least UNIT size.  */
   if ((flags & SECTION_CODE) != 0 || !decl || !DECL_P (decl))
     align = MIN_UNITS_PER_WORD;
@@ -21032,8 +21397,6 @@ rs6000_xcoff_file_start (void)
 			   main_input_filename, ".ro_");
   rs6000_gen_section_name (&xcoff_tls_data_section_name,
 			   main_input_filename, ".tls_");
-  rs6000_gen_section_name (&xcoff_tbss_section_name,
-			   main_input_filename, ".tbss_[UL]");
 
   fputs ("\t.file\t", asm_out_file);
   output_quoted_string (asm_out_file, main_input_filename);
@@ -21113,7 +21476,7 @@ rs6000_declare_alias (struct symtab_node *n, void *d)
 	      putc ('\n', data->file);
 	    }
 	  fputs ("\t.globl ", data->file);
-	  RS6000_OUTPUT_BASENAME (data->file, buffer);
+	  assemble_name (data->file, buffer);
 	  putc ('\n', data->file);
 	}
 #ifdef ASM_WEAKEN_DECL
@@ -21136,13 +21499,12 @@ rs6000_declare_alias (struct symtab_node *n, void *d)
 	  putc ('\n', data->file);
 	}
       fputs ("\t.lglobl ", data->file);
-      RS6000_OUTPUT_BASENAME (data->file, buffer);
+      assemble_name (data->file, buffer);
       putc ('\n', data->file);
     }
   if (data->function_descriptor)
-    fputs (".", data->file);
-  RS6000_OUTPUT_BASENAME (data->file, buffer);
-  fputs (":\n", data->file);
+    putc ('.', data->file);
+  ASM_OUTPUT_LABEL (data->file, buffer);
   return false;
 }
 
@@ -21219,21 +21581,24 @@ rs6000_xcoff_declare_function_name (FILE *file, const char *name, tree decl)
       RS6000_OUTPUT_BASENAME (file, buffer);
       putc ('\n', file);
     }
+
   fputs ("\t.csect ", file);
-  RS6000_OUTPUT_BASENAME (file, buffer);
-  fputs (TARGET_32BIT ? "[DS]\n" : "[DS],3\n", file);
-  RS6000_OUTPUT_BASENAME (file, buffer);
-  fputs (":\n", file);
+  assemble_name (file, buffer);
+  fputs (TARGET_32BIT ? "\n" : ",3\n", file);
+
+  ASM_OUTPUT_LABEL (file, buffer);
+
   symtab_node::get (decl)->call_for_symbol_and_aliases (rs6000_declare_alias,
 							&data, true);
   fputs (TARGET_32BIT ? "\t.long ." : "\t.llong .", file);
   RS6000_OUTPUT_BASENAME (file, buffer);
   fputs (", TOC[tc0], 0\n", file);
+
   in_section = NULL;
   switch_to_section (function_section (decl));
   putc ('.', file);
-  RS6000_OUTPUT_BASENAME (file, buffer);
-  fputs (":\n", file);
+  ASM_OUTPUT_LABEL (file, buffer);
+
   data.function_descriptor = true;
   symtab_node::get (decl)->call_for_symbol_and_aliases (rs6000_declare_alias,
 							&data, true);
@@ -21259,7 +21624,7 @@ rs6000_xcoff_asm_globalize_decl_name (FILE *stream, tree decl)
 {
   const char *name = XSTR (XEXP (DECL_RTL (decl), 0), 0);
   fputs (GLOBAL_ASM_OP, stream);
-  RS6000_OUTPUT_BASENAME (stream, name);
+  assemble_name (stream, name);
 #ifdef HAVE_GAS_HIDDEN
   fputs (rs6000_xcoff_visibility (decl), stream);
 #endif
@@ -21274,27 +21639,50 @@ rs6000_xcoff_asm_output_aligned_decl_common (FILE *stream,
 					     tree decl ATTRIBUTE_UNUSED,
 					     const char *name,
 					     unsigned HOST_WIDE_INT size,
-					     unsigned HOST_WIDE_INT align)
+					     unsigned int align)
 {
-  unsigned HOST_WIDE_INT align2 = 2;
+  unsigned int align2 = 2;
+
+  if (align == 0)
+    align = DATA_ABI_ALIGNMENT (TREE_TYPE (decl), DECL_ALIGN (decl));
 
   if (align > 32)
     align2 = floor_log2 (align / BITS_PER_UNIT);
   else if (size > 4)
     align2 = 3;
 
-  fputs (COMMON_ASM_OP, stream);
-  RS6000_OUTPUT_BASENAME (stream, name);
+  if (! DECL_COMMON (decl))
+    {
+      /* Forget section.  */
+      in_section = NULL;
 
-  fprintf (stream,
-	   "," HOST_WIDE_INT_PRINT_UNSIGNED "," HOST_WIDE_INT_PRINT_UNSIGNED,
-	   size, align2);
+      /* Globalize TLS BSS.  */
+      if (TREE_PUBLIC (decl) && DECL_THREAD_LOCAL_P (decl))
+	fprintf (stream, "\t.globl %s\n", name);
+
+      /* Switch to section and skip space.  */
+      fprintf (stream, "\t.csect %s,%u\n", name, align2);
+      ASM_DECLARE_OBJECT_NAME (stream, name, decl);
+      ASM_OUTPUT_SKIP (stream, size ? size : 1);
+      return;
+    }
+
+  if (TREE_PUBLIC (decl))
+    {
+      fprintf (stream,
+	       "\t.comm %s," HOST_WIDE_INT_PRINT_UNSIGNED ",%u" ,
+	       name, size, align2);
 
 #ifdef HAVE_GAS_HIDDEN
-  if (decl != NULL)
-    fputs (rs6000_xcoff_visibility (decl), stream);
+      if (decl != NULL)
+	fputs (rs6000_xcoff_visibility (decl), stream);
 #endif
-  putc ('\n', stream);
+      putc ('\n', stream);
+    }
+  else
+      fprintf (stream,
+	       "\t.lcomm %s," HOST_WIDE_INT_PRINT_UNSIGNED ",%s,%u\n",
+	       (*targetm.strip_name_encoding) (name), size, name, align2);
 }
 
 /* This macro produces the initial definition of a object (variable) name.
@@ -21305,8 +21693,7 @@ void
 rs6000_xcoff_declare_object_name (FILE *file, const char *name, tree decl)
 {
   struct declare_alias_data data = {file, false};
-  RS6000_OUTPUT_BASENAME (file, name);
-  fputs (":\n", file);
+  ASM_OUTPUT_LABEL (file, name);
   symtab_node::get_create (decl)->call_for_symbol_and_aliases (rs6000_declare_alias,
 							       &data, true);
 }
@@ -21360,19 +21747,49 @@ rs6000_xcoff_encode_section_info (tree decl, rtx rtl, int first)
 
   SYMBOL_REF_FLAGS (symbol) = flags;
 
-  /* Append mapping class to extern decls.  */
   symname = XSTR (symbol, 0);
-  if (decl /* sync condition with assemble_external () */
-      && DECL_P (decl) && DECL_EXTERNAL (decl) && TREE_PUBLIC (decl)
-      && ((TREE_CODE (decl) == VAR_DECL && !DECL_THREAD_LOCAL_P (decl))
-	  || TREE_CODE (decl) == FUNCTION_DECL)
+
+  /* Append CSECT mapping class, unless the symbol already is qualified.
+     Aliases are implemented as labels, so the symbol name should not add
+     a mapping class.  */
+  if (decl
+      && DECL_P (decl)
+      && VAR_OR_FUNCTION_DECL_P (decl)
+      && symtab_node::get (decl)->alias == 0
       && symname[strlen (symname) - 1] != ']')
     {
-      char *newname = (char *) alloca (strlen (symname) + 5);
-      strcpy (newname, symname);
-      strcat (newname, (TREE_CODE (decl) == FUNCTION_DECL
-			? "[DS]" : "[UA]"));
-      XSTR (symbol, 0) = ggc_strdup (newname);
+      const char *smclass = NULL;
+
+      if (TREE_CODE (decl) == FUNCTION_DECL)
+	smclass = "[DS]";
+      else if (DECL_THREAD_LOCAL_P (decl))
+	{
+	  if (bss_initializer_p (decl))
+	    smclass = "[UL]";
+	  else if (flag_data_sections)
+	    smclass = "[TL]";
+	}
+      else if (DECL_EXTERNAL (decl))
+	smclass = "[UA]";
+      else if (bss_initializer_p (decl))
+	smclass = "[BS]";
+      else if (flag_data_sections)
+	{
+	  /* This must exactly match the logic of select section.  */
+	  if (decl_readonly_section (decl, compute_reloc_for_var (decl)))
+	    smclass = "[RO]";
+	  else
+	    smclass = "[RW]";
+	}
+
+      if (smclass != NULL)
+	{
+	  char *newname = XALLOCAVEC (char, strlen (symname) + 5);
+
+	  strcpy (newname, symname);
+	  strcat (newname, smclass);
+	  XSTR (symbol, 0) = ggc_strdup (newname);
+	}
     }
 }
 #endif /* HAVE_AS_TLS */
@@ -21383,12 +21800,10 @@ rs6000_asm_weaken_decl (FILE *stream, tree decl,
 			const char *name, const char *val)
 {
   fputs ("\t.weak\t", stream);
-  RS6000_OUTPUT_BASENAME (stream, name);
+  assemble_name (stream, name);
   if (decl && TREE_CODE (decl) == FUNCTION_DECL
       && DEFAULT_ABI == ABI_AIX && DOT_SYMBOLS)
     {
-      if (TARGET_XCOFF)						
-	fputs ("[DS]", stream);
 #if TARGET_XCOFF && HAVE_GAS_HIDDEN
       if (TARGET_XCOFF)
 	fputs (rs6000_xcoff_visibility (decl), stream);
@@ -21401,6 +21816,7 @@ rs6000_asm_weaken_decl (FILE *stream, tree decl,
     fputs (rs6000_xcoff_visibility (decl), stream);
 #endif
   fputc ('\n', stream);
+
   if (val)
     {
 #ifdef ASM_OUTPUT_DEF
@@ -22119,10 +22535,13 @@ rs6000_ira_change_pseudo_allocno_class (int regno ATTRIBUTE_UNUSED,
 	 of allocno class.  */
       if (best_class == BASE_REGS)
 	return GENERAL_REGS;
-      if (TARGET_VSX
-	  && (best_class == FLOAT_REGS || best_class == ALTIVEC_REGS))
+      if (TARGET_VSX && best_class == FLOAT_REGS)
 	return VSX_REGS;
       return best_class;
+
+    case VSX_REGS:
+      if (best_class == ALTIVEC_REGS)
+	return ALTIVEC_REGS;
 
     default:
       break;
@@ -22946,6 +23365,16 @@ rs6000_vectorize_vec_perm_const (machine_mode vmode, rtx target, rtx op0,
   if (TARGET_ALTIVEC && testing_p)
     return true;
 
+  if (op0)
+    {
+      rtx nop0 = force_reg (vmode, op0);
+      if (op0 == op1)
+        op1 = nop0;
+      op0 = nop0;
+    }
+  if (op1)
+    op1 = force_reg (vmode, op1);
+
   /* Check for ps_merge* or xxpermdi insns.  */
   if ((vmode == V2DFmode || vmode == V2DImode) && VECTOR_MEM_VSX_P (vmode))
     {
@@ -23231,12 +23660,12 @@ rs6000_compute_pressure_classes (enum reg_class *pressure_classes)
 
   n = 0;
   pressure_classes[n++] = GENERAL_REGS;
+  if (TARGET_ALTIVEC)
+    pressure_classes[n++] = ALTIVEC_REGS;
   if (TARGET_VSX)
     pressure_classes[n++] = VSX_REGS;
   else
     {
-      if (TARGET_ALTIVEC)
-	pressure_classes[n++] = ALTIVEC_REGS;
       if (TARGET_HARD_FLOAT)
 	pressure_classes[n++] = FLOAT_REGS;
     }
@@ -23447,6 +23876,31 @@ rs6000_scalar_mode_supported_p (scalar_mode mode)
     return default_scalar_mode_supported_p (mode);
 }
 
+/* Target hook for libgcc_floating_mode_supported_p.  */
+
+static bool
+rs6000_libgcc_floating_mode_supported_p (scalar_float_mode mode)
+{
+  switch (mode)
+    {
+    case E_SFmode:
+    case E_DFmode:
+    case E_TFmode:
+      return true;
+
+      /* We only return true for KFmode if IEEE 128-bit types are supported, and
+	 if long double does not use the IEEE 128-bit format.  If long double
+	 uses the IEEE 128-bit format, it will use TFmode and not KFmode.
+	 Because the code will not use KFmode in that case, there will be aborts
+	 because it can't find KFmode in the Floatn types.  */
+    case E_KFmode:
+      return TARGET_FLOAT128_TYPE && !TARGET_IEEEQUAD;
+
+    default:
+      return false;
+    }
+}
+
 /* Target hook for vector_mode_supported_p.  */
 static bool
 rs6000_vector_mode_supported_p (machine_mode mode)
@@ -23605,6 +24059,7 @@ static struct rs6000_opt_mask const rs6000_opt_masks[] =
   { "mulhw",			OPTION_MASK_MULHW,		false, true  },
   { "multiple",			OPTION_MASK_MULTIPLE,		false, true  },
   { "pcrel",			OPTION_MASK_PCREL,		false, true  },
+  { "pcrel-opt",		OPTION_MASK_PCREL_OPT,		false, true  },
   { "popcntb",			OPTION_MASK_POPCNTB,		false, true  },
   { "popcntd",			OPTION_MASK_POPCNTD,		false, true  },
   { "power8-fusion",		OPTION_MASK_P8_FUSION,		false, true  },
@@ -23613,6 +24068,7 @@ static struct rs6000_opt_mask const rs6000_opt_masks[] =
   { "power9-minmax",		OPTION_MASK_P9_MINMAX,		false, true  },
   { "power9-misc",		OPTION_MASK_P9_MISC,		false, true  },
   { "power9-vector",		OPTION_MASK_P9_VECTOR,		false, true  },
+  { "power10-fusion",		OPTION_MASK_P10_FUSION,		false, true  },
   { "powerpc-gfxopt",		OPTION_MASK_PPC_GFXOPT,		false, true  },
   { "powerpc-gpopt",		OPTION_MASK_PPC_GPOPT,		false, true  },
   { "prefixed",			OPTION_MASK_PREFIXED,		false, true  },
@@ -24990,6 +25446,20 @@ rs6000_legitimate_constant_p (machine_mode mode, rtx x)
   return true;
 }
 
+#if TARGET_AIX_OS
+/* Implement TARGET_PRECOMPUTE_TLS_P.
+
+   On the AIX, TLS symbols are in the TOC, which is maintained in the
+   constant pool.  AIX TOC TLS symbols need to be pre-computed, but
+   must be considered legitimate constants.  */
+
+static bool
+rs6000_aix_precompute_tls_p (machine_mode mode ATTRIBUTE_UNUSED, rtx x)
+{
+  return tls_referenced_p (x);
+}
+#endif
+
 
 /* Return TRUE iff the sequence ending in LAST sets the static chain.  */
 
@@ -25704,6 +26174,76 @@ address_to_insn_form (rtx addr,
   return INSN_FORM_BAD;
 }
 
+/* Given address rtx ADDR for a load of MODE, is this legitimate for a
+   non-prefixed D-form or X-form instruction?  NON_PREFIXED_FORMAT is
+   given NON_PREFIXED_D or NON_PREFIXED_DS to indicate whether we want
+   a D-form or DS-form instruction.  X-form and base_reg are always
+   allowed.  */
+bool
+address_is_non_pfx_d_or_x (rtx addr, machine_mode mode,
+			   enum non_prefixed_form non_prefixed_format)
+{
+  enum insn_form result_form;
+
+  result_form = address_to_insn_form (addr, mode, non_prefixed_format);
+
+  switch (non_prefixed_format)
+    {
+    case NON_PREFIXED_D:
+      switch (result_form)
+	{
+	case INSN_FORM_X:
+	case INSN_FORM_D:
+	case INSN_FORM_DS:
+	case INSN_FORM_BASE_REG:
+	  return true;
+	default:
+	  return false;
+	}
+      break;
+    case NON_PREFIXED_DS:
+      switch (result_form)
+	{
+	case INSN_FORM_X:
+	case INSN_FORM_DS:
+	case INSN_FORM_BASE_REG:
+	  return true;
+	default:
+	  return false;
+	}
+      break;
+    default:
+      break;
+    }
+  return false;
+}
+
+/* Return true if an REG with a given MODE is loaded from or stored into a MEM
+   location uses a non-prefixed D/DS/DQ-form address.  This is used to validate
+   the load or store with the PCREL_OPT optimization to make sure it is an
+   instruction that can be optimized.
+
+   We need to specify the MODE separately from the REG to allow for loads that
+   include zero/sign/float extension.  */
+
+bool
+pcrel_opt_valid_mem_p (rtx reg, machine_mode mode, rtx mem)
+{
+  /* If the instruction is indexed only like LFIWAX/LXSIWAX we cannot do the
+     PCREL_OPT optimization.  */
+  enum non_prefixed_form non_prefixed = reg_to_non_prefixed (reg, mode);
+  if (non_prefixed == NON_PREFIXED_X)
+    return false;
+
+  /* Check if this is a non-prefixed D/DS/DQ-form instruction.  */
+  rtx addr = XEXP (mem, 0);
+  enum insn_form iform = address_to_insn_form (addr, mode, non_prefixed);
+  return (iform == INSN_FORM_BASE_REG
+	  || iform == INSN_FORM_D
+	  || iform == INSN_FORM_DS
+	  || iform == INSN_FORM_DQ);
+}
+
 /* Helper function to see if we're potentially looking at lfs/stfs.
    - PARALLEL containing a SET and a CLOBBER
    - stfs:
@@ -25762,7 +26302,7 @@ is_lfs_stfs_insn (rtx_insn *insn)
 /* Helper function to take a REG and a MODE and turn it into the non-prefixed
    instruction format (D/DS/DQ) used for offset memory.  */
 
-static enum non_prefixed_form
+enum non_prefixed_form
 reg_to_non_prefixed (rtx reg, machine_mode mode)
 {
   /* If it isn't a register, use the defaults.  */
@@ -25963,7 +26503,7 @@ prefixed_paddi_p (rtx_insn *insn)
 
 /* Whether the next instruction needs a 'p' prefix issued before the
    instruction is printed out.  */
-static bool next_insn_prefixed_p;
+static bool prepend_p_to_next_insn;
 
 /* Define FINAL_PRESCAN_INSN if some processing needs to be done before
    outputting the assembler code.  On the PowerPC, we remember if the current
@@ -25974,7 +26514,9 @@ static bool next_insn_prefixed_p;
 void
 rs6000_final_prescan_insn (rtx_insn *insn, rtx [], int)
 {
-  next_insn_prefixed_p = (get_attr_prefixed (insn) != PREFIXED_NO);
+  prepend_p_to_next_insn = (get_attr_maybe_prefixed (insn)
+			    == MAYBE_PREFIXED_YES
+			    && get_attr_prefixed (insn) == PREFIXED_YES);
   return;
 }
 
@@ -25984,10 +26526,33 @@ rs6000_final_prescan_insn (rtx_insn *insn, rtx [], int)
 void
 rs6000_asm_output_opcode (FILE *stream)
 {
-  if (next_insn_prefixed_p)
-    fprintf (stream, "p");
+  if (prepend_p_to_next_insn)
+    {
+      fprintf (stream, "p");
+
+      /* Reset the flag in the case where there are separate insn lines in the
+	 sequence, so the 'p' is only emitted for the first line.  This shows up
+	 when we are doing the PCREL_OPT optimization, in that the label created
+	 with %r<n> would have a leading 'p' printed.  */
+      prepend_p_to_next_insn = false;
+    }
 
   return;
+}
+
+/* Emit the relocation to tie the next instruction to a previous instruction
+   that loads up an external address.  This is used to do the PCREL_OPT
+   optimization.  Note, the label is generated after the PLD of the got
+   pc-relative address to allow for the assembler to insert NOPs before the PLD
+   instruction.  The operand is a constant integer that is the label
+   number.  */
+
+void
+output_pcrel_opt_reloc (rtx label_num)
+{
+  rtx operands[1] = { label_num };
+  output_asm_insn (".reloc .Lpcrel%0-8,R_PPC64_PCREL_OPT,.-(.Lpcrel%0-8)",
+		   operands);
 }
 
 /* Adjust the length of an INSN.  LENGTH is the currently-computed length and
@@ -27116,56 +27681,127 @@ rs6000_globalize_decl_name (FILE * stream, tree decl)
    library before you can switch the real*16 type at compile time.
 
    We use the TARGET_MANGLE_DECL_ASSEMBLER_NAME hook to change this name.  We
-   only do this if the default is that long double is IBM extended double, and
-   the user asked for IEEE 128-bit.  */
+   only do this transformation if the __float128 type is enabled.  This
+   prevents us from doing the transformation on older 32-bit ports that might
+   have enabled using IEEE 128-bit floating point as the default long double
+   type.  */
 
 static tree
 rs6000_mangle_decl_assembler_name (tree decl, tree id)
 {
-  if (!TARGET_IEEEQUAD_DEFAULT && TARGET_IEEEQUAD && TARGET_LONG_DOUBLE_128
+  if (TARGET_FLOAT128_TYPE && TARGET_IEEEQUAD && TARGET_LONG_DOUBLE_128
       && TREE_CODE (decl) == FUNCTION_DECL
-      && DECL_IS_UNDECLARED_BUILTIN (decl))
+      && DECL_IS_UNDECLARED_BUILTIN (decl)
+      && DECL_BUILT_IN_CLASS (decl) == BUILT_IN_NORMAL)
     {
       size_t len = IDENTIFIER_LENGTH (id);
       const char *name = IDENTIFIER_POINTER (id);
+      char *newname = NULL;
 
-      if (name[len - 1] == 'l')
+      /* See if it is one of the built-in functions with an unusual name.  */
+      switch (DECL_FUNCTION_CODE (decl))
 	{
-	  bool uses_ieee128_p = false;
-	  tree type = TREE_TYPE (decl);
-	  machine_mode ret_mode = TYPE_MODE (type);
+	case BUILT_IN_DREML:
+	  newname = xstrdup ("__remainderieee128");
+	  break;
 
-	  /* See if the function returns a IEEE 128-bit floating point type or
-	     complex type.  */
-	  if (ret_mode == TFmode || ret_mode == TCmode)
-	    uses_ieee128_p = true;
-	  else
+	case BUILT_IN_GAMMAL:
+	  newname = xstrdup ("__lgammaieee128");
+	  break;
+
+	case BUILT_IN_GAMMAL_R:
+	case BUILT_IN_LGAMMAL_R:
+	  newname = xstrdup ("__lgammaieee128_r");
+	  break;
+
+	case BUILT_IN_NEXTTOWARD:
+	  newname = xstrdup ("__nexttoward_to_ieee128");
+	  break;
+
+	case BUILT_IN_NEXTTOWARDF:
+	  newname = xstrdup ("__nexttowardf_to_ieee128");
+	  break;
+
+	case BUILT_IN_NEXTTOWARDL:
+	  newname = xstrdup ("__nexttowardieee128");
+	  break;
+
+	case BUILT_IN_POW10L:
+	  newname = xstrdup ("__exp10ieee128");
+	  break;
+
+	case BUILT_IN_SCALBL:
+	  newname = xstrdup ("__scalbieee128");
+	  break;
+
+	case BUILT_IN_SIGNIFICANDL:
+	  newname = xstrdup ("__significandieee128");
+	  break;
+
+	case BUILT_IN_SINCOSL:
+	  newname = xstrdup ("__sincosieee128");
+	  break;
+
+	default:
+	  break;
+	}
+
+      /* Update the __builtin_*printf and __builtin_*scanf functions.  */
+      if (!newname)
+	{
+	  size_t printf_len = strlen ("printf");
+	  size_t scanf_len = strlen ("scanf");
+
+	  if (len >= printf_len
+	      && strcmp (name + len - printf_len, "printf") == 0)
+	    newname = xasprintf ("__%sieee128", name);
+
+	  else if (len >= scanf_len
+		   && strcmp (name + len - scanf_len, "scanf") == 0)
+	    newname = xasprintf ("__isoc99_%sieee128", name);
+
+	  else if (name[len - 1] == 'l')
 	    {
-	      function_args_iterator args_iter;
-	      tree arg;
+	      bool uses_ieee128_p = false;
+	      tree type = TREE_TYPE (decl);
+	      machine_mode ret_mode = TYPE_MODE (type);
 
-	      /* See if the function passes a IEEE 128-bit floating point type
-		 or complex type.  */
-	      FOREACH_FUNCTION_ARGS (type, arg, args_iter)
+	      /* See if the function returns a IEEE 128-bit floating point type or
+		 complex type.  */
+	      if (ret_mode == TFmode || ret_mode == TCmode)
+		uses_ieee128_p = true;
+	      else
 		{
-		  machine_mode arg_mode = TYPE_MODE (arg);
-		  if (arg_mode == TFmode || arg_mode == TCmode)
+		  function_args_iterator args_iter;
+		  tree arg;
+
+		  /* See if the function passes a IEEE 128-bit floating point type
+		     or complex type.  */
+		  FOREACH_FUNCTION_ARGS (type, arg, args_iter)
 		    {
-		      uses_ieee128_p = true;
-		      break;
+		      machine_mode arg_mode = TYPE_MODE (arg);
+		      if (arg_mode == TFmode || arg_mode == TCmode)
+			{
+			  uses_ieee128_p = true;
+			  break;
+			}
 		    }
 		}
-	    }
 
-	  /* If we passed or returned an IEEE 128-bit floating point type,
-	     change the name.  */
-	  if (uses_ieee128_p)
-	    {
-	      char *name2 = (char *) alloca (len + 4);
-	      memcpy (name2, name, len - 1);
-	      strcpy (name2 + len - 1, "f128");
-	      id = get_identifier (name2);
+	      /* If we passed or returned an IEEE 128-bit floating point type,
+		 change the name.  Use __<name>ieee128, instead of <name>l.  */
+	      if (uses_ieee128_p)
+		newname = xasprintf ("__%.*sieee128", (int)(len - 1), name);
 	    }
+	}
+
+      if (newname)
+	{
+	  if (TARGET_DEBUG_BUILTIN)
+	    fprintf (stderr, "Map %s => %s\n", name, newname);
+
+	  id = get_identifier (newname);
+	  free (newname);
 	}
     }
 

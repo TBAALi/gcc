@@ -1,4 +1,4 @@
-/* Copyright (C) 1988-2020 Free Software Foundation, Inc.
+/* Copyright (C) 1988-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -1348,9 +1348,10 @@ ix86_split_lea_for_addr (rtx_insn *insn, rtx operands[], machine_mode mode)
 	  if (regno0 != regno2)
 	    emit_insn (gen_rtx_SET (target, parts.index));
 
-	  /* Use shift for scaling.  */
-	  ix86_emit_binop (ASHIFT, mode, target,
-			   GEN_INT (exact_log2 (parts.scale)));
+	  /* Use shift for scaling, but emit it as MULT instead
+	     to avoid it being immediately peephole2 optimized back
+	     into lea.  */
+	  ix86_emit_binop (MULT, mode, target, GEN_INT (parts.scale));
 
 	  if (parts.base)
 	    ix86_emit_binop (PLUS, mode, target, parts.base);
@@ -1549,6 +1550,8 @@ ix86_expand_convert_uns_sixf_sse (rtx, rtx)
   gcc_unreachable ();
 }
 
+static rtx ix86_expand_sse_fabs (rtx op0, rtx *smask);
+
 /* Convert an unsigned SImode value into a DFmode.  Only currently used
    for SSE, but applicable anywhere.  */
 
@@ -1568,6 +1571,11 @@ ix86_expand_convert_uns_sidf_sse (rtx target, rtx input)
   x = const_double_from_real_value (TWO31r, DFmode);
 
   x = expand_simple_binop (DFmode, PLUS, fp, x, target, 0, OPTAB_DIRECT);
+
+  /* Remove the sign with FE_DOWNWARD, where x - x = -0.0.  */
+  if (HONOR_SIGNED_ZEROS (DFmode) && flag_rounding_math)
+    x = ix86_expand_sse_fabs (x, NULL);
+
   if (x != target)
     emit_move_insn (target, x);
 }
@@ -2650,6 +2658,14 @@ ix86_expand_int_compare (enum rtx_code code, rtx op0, rtx op1)
   machine_mode cmpmode;
   rtx tmp, flags;
 
+  /* Swap operands to emit carry flag comparison.  */
+  if ((code == GTU || code == LEU)
+      && nonimmediate_operand (op1, VOIDmode))
+    {
+      std::swap (op0, op1);
+      code = swap_condition (code);
+    }
+
   cmpmode = SELECT_CC_MODE (code, op0, op1);
   flags = gen_rtx_REG (cmpmode, FLAGS_REG);
 
@@ -3469,6 +3485,37 @@ ix86_valid_mask_cmp_mode (machine_mode mode)
   return vector_size == 64 || TARGET_AVX512VL;
 }
 
+/* Return true if integer mask comparison should be used.  */
+static bool
+ix86_use_mask_cmp_p (machine_mode mode, machine_mode cmp_mode,
+		     rtx op_true, rtx op_false)
+{
+  int vector_size = GET_MODE_SIZE (mode);
+
+  if (vector_size < 16)
+    return false;
+  else if (vector_size == 64)
+    return true;
+
+  /* When op_true is NULL, op_false must be NULL, or vice versa.  */
+  gcc_assert (!op_true == !op_false);
+
+  /* When op_true/op_false is NULL or cmp_mode is not valid mask cmp mode,
+     vector dest is required.  */
+  if (!op_true || !ix86_valid_mask_cmp_mode (cmp_mode))
+    return false;
+
+  /* Exclude those that could be optimized in ix86_expand_sse_movcc.  */
+  if (op_false == CONST0_RTX (mode)
+      || op_true == CONST0_RTX (mode)
+      || (INTEGRAL_MODE_P (mode)
+	  && (op_true == CONSTM1_RTX (mode)
+	      || op_false == CONSTM1_RTX (mode))))
+    return false;
+
+  return true;
+}
+
 /* Expand an SSE comparison.  Return the register with the result.  */
 
 static rtx
@@ -3485,7 +3532,7 @@ ix86_expand_sse_cmp (rtx dest, enum rtx_code code, rtx cmp_op0, rtx cmp_op1,
   bool maskcmp = false;
   rtx x;
 
-  if (ix86_valid_mask_cmp_mode (cmp_ops_mode))
+  if (ix86_use_mask_cmp_p (mode, cmp_ops_mode, op_true, op_false))
     {
       unsigned int nbits = GET_MODE_NUNITS (cmp_ops_mode);
       maskcmp = true;
@@ -3517,7 +3564,7 @@ ix86_expand_sse_cmp (rtx dest, enum rtx_code code, rtx cmp_op0, rtx cmp_op1,
 
   x = gen_rtx_fmt_ee (code, cmp_mode, cmp_op0, cmp_op1);
 
-  if (cmp_mode != mode && !maskcmp)
+  if (cmp_mode != mode)
     {
       x = force_reg (cmp_ops_mode, x);
       convert_move (dest, x, false);
@@ -3544,9 +3591,6 @@ ix86_expand_sse_movcc (rtx dest, rtx cmp, rtx op_true, rtx op_false)
       return;
     }
 
-  /* In AVX512F the result of comparison is an integer mask.  */
-  bool maskcmp = mode != cmpmode && ix86_valid_mask_cmp_mode (mode);
-
   rtx t2, t3, x;
 
   /* If we have an integer mask and FP value then we need
@@ -3557,8 +3601,11 @@ ix86_expand_sse_movcc (rtx dest, rtx cmp, rtx op_true, rtx op_false)
       cmp = gen_rtx_SUBREG (mode, cmp, 0);
     }
 
-  if (maskcmp)
+  /* In AVX512F the result of comparison is an integer mask.  */
+  if (mode != cmpmode
+      && GET_MODE_CLASS (cmpmode) == MODE_INT)
     {
+      gcc_assert (ix86_valid_mask_cmp_mode (mode));
       /* Using vector move with mask register.  */
       cmp = force_reg (cmpmode, cmp);
       /* Optimize for mask zero.  */
@@ -3568,17 +3615,11 @@ ix86_expand_sse_movcc (rtx dest, rtx cmp, rtx op_true, rtx op_false)
 		  ? force_reg (mode, op_false) : op_false);
       if (op_true == CONST0_RTX (mode))
 	{
-	  rtx (*gen_not) (rtx, rtx);
-	  switch (cmpmode)
-	    {
-	    case E_QImode: gen_not = gen_knotqi; break;
-	    case E_HImode: gen_not = gen_knothi; break;
-	    case E_SImode: gen_not = gen_knotsi; break;
-	    case E_DImode: gen_not = gen_knotdi; break;
-	    default: gcc_unreachable ();
-	    }
 	  rtx n = gen_reg_rtx (cmpmode);
-	  emit_insn (gen_not (n, cmp));
+	  if (cmpmode == E_DImode && !TARGET_64BIT)
+	    emit_insn (gen_knotdi (n, cmp));
+	  else
+	    emit_insn (gen_rtx_SET (n, gen_rtx_fmt_e (NOT, cmpmode, cmp)));
 	  cmp = n;
 	  /* Reverse op_true op_false.  */
 	  std::swap (op_true, op_false);
@@ -3639,6 +3680,13 @@ ix86_expand_sse_movcc (rtx dest, rtx cmp, rtx op_true, rtx op_false)
 
   switch (mode)
     {
+    case E_V2SFmode:
+      if (TARGET_SSE4_1)
+	{
+	  gen = gen_mmx_blendvps;
+	  op_true = force_reg (mode, op_true);
+	}
+      break;
     case E_V4SFmode:
       if (TARGET_SSE4_1)
 	gen = gen_sse4_1_blendvps;
@@ -3659,6 +3707,21 @@ ix86_expand_sse_movcc (rtx dest, rtx cmp, rtx op_true, rtx op_false)
 	{
 	  gen = gen_sse4_1_blendvsd;
 	  op_true = force_reg (mode, op_true);
+	}
+      break;
+    case E_V8QImode:
+    case E_V4HImode:
+    case E_V2SImode:
+      if (TARGET_SSE4_1)
+	{
+	  op_true = force_reg (mode, op_true);
+
+	  gen = gen_mmx_pblendvb;
+	  if (mode != V8QImode)
+	    d = gen_reg_rtx (V8QImode);
+	  op_false = gen_lowpart (V8QImode, op_false);
+	  op_true = gen_lowpart (V8QImode, op_true);
+	  cmp = gen_lowpart (V8QImode, cmp);
 	}
       break;
     case E_V16QImode:
@@ -4022,7 +4085,7 @@ ix86_expand_fp_vec_cmp (rtx operands[])
     }
   else
     cmp = ix86_expand_sse_cmp (operands[0], code, operands[2], operands[3],
-			       operands[1], operands[2]);
+			       NULL, NULL);
 
   if (operands[0] != cmp)
     emit_move_insn (operands[0], cmp);
@@ -4047,7 +4110,7 @@ ix86_expand_int_sse_cmp (rtx dest, enum rtx_code code, rtx cop0, rtx cop1,
     ;
   /* AVX512F supports all of the comparsions
      on all 128/256/512-bit vector int types.  */
-  else if (ix86_valid_mask_cmp_mode (mode))
+  else if (ix86_use_mask_cmp_p (data_mode, mode, op_true, op_false))
     ;
   else
     {
@@ -4167,15 +4230,31 @@ ix86_expand_int_sse_cmp (rtx dest, enum rtx_code code, rtx cop0, rtx cop1,
 	      else if (code == GT && TARGET_SSE4_1)
 		gen = gen_sminv16qi3;
 	      break;
+	    case E_V8QImode:
+	      if (code == GTU && TARGET_SSE2)
+		gen = gen_uminv8qi3;
+	      else if (code == GT && TARGET_SSE4_1)
+		gen = gen_sminv8qi3;
+	      break;
 	    case E_V8HImode:
 	      if (code == GTU && TARGET_SSE4_1)
 		gen = gen_uminv8hi3;
 	      else if (code == GT && TARGET_SSE2)
 		gen = gen_sminv8hi3;
 	      break;
+	    case E_V4HImode:
+	      if (code == GTU && TARGET_SSE4_1)
+		gen = gen_uminv4hi3;
+	      else if (code == GT && TARGET_SSE2)
+		gen = gen_sminv4hi3;
+	      break;
 	    case E_V4SImode:
 	      if (TARGET_SSE4_1)
 		gen = (code == GTU) ? gen_uminv4si3 : gen_sminv4si3;
+	      break;
+	    case E_V2SImode:
+	      if (TARGET_SSE4_1)
+		gen = (code == GTU) ? gen_uminv2si3 : gen_sminv2si3;
 	      break;
 	    case E_V2DImode:
 	      if (TARGET_AVX512VL)
@@ -4217,6 +4296,7 @@ ix86_expand_int_sse_cmp (rtx dest, enum rtx_code code, rtx cop0, rtx cop1,
 	    case E_V8SImode:
 	    case E_V4DImode:
 	    case E_V4SImode:
+	    case E_V2SImode:
 	    case E_V2DImode:
 		{
 		  rtx t1, t2, mask;
@@ -4241,7 +4321,9 @@ ix86_expand_int_sse_cmp (rtx dest, enum rtx_code code, rtx cop0, rtx cop1,
 	    case E_V32QImode:
 	    case E_V16HImode:
 	    case E_V16QImode:
+	    case E_V8QImode:
 	    case E_V8HImode:
+	    case E_V4HImode:
 	      /* Perform a parallel unsigned saturating subtraction.  */
 	      x = gen_reg_rtx (mode);
 	      emit_insn (gen_rtx_SET
@@ -5954,6 +6036,7 @@ expand_set_or_cpymem_via_rep (rtx destmem, rtx srcmem,
   /* If possible, it is shorter to use rep movs.
      TODO: Maybe it is better to move this logic to decide_alg.  */
   if (mode == QImode && CONST_INT_P (count) && !(INTVAL (count) & 3)
+      && !TARGET_PREFER_KNOWN_REP_MOVSB_STOSB
       && (!issetmem || orig_value == const0_rtx))
     mode = SImode;
 
@@ -6962,7 +7045,12 @@ decide_alg (HOST_WIDE_INT count, HOST_WIDE_INT expected_size,
 		  else if (!any_alg_usable_p)
 		    break;
 		}
-	      else if (alg_usable_p (candidate, memset, have_as))
+	      else if (alg_usable_p (candidate, memset, have_as)
+		       && !(TARGET_PREFER_KNOWN_REP_MOVSB_STOSB
+			    && candidate == rep_prefix_1_byte
+			    /* NB: If min_size != max_size, size is
+			       unknown.  */
+			    && min_size != max_size))
 		{
 		  *noalign = algs->size[i].noalign;
 		  return candidate;
@@ -7027,7 +7115,7 @@ decide_alignment (int align,
   desired_align = GET_MODE_SIZE (move_mode);
   /* PentiumPro has special logic triggering for 8 byte aligned blocks.
      copying whole cacheline at once.  */
-  if (TARGET_PENTIUMPRO
+  if (TARGET_CPU_P (PENTIUMPRO)
       && (alg == rep_prefix_4_byte || alg == rep_prefix_1_byte))
     desired_align = 8;
 
@@ -8633,11 +8721,6 @@ ix86_expand_sse_comi (const struct builtin_description *d, tree exp,
     op0 = safe_vector_operand (op0, mode0);
   if (VECTOR_MODE_P (mode1))
     op1 = safe_vector_operand (op1, mode1);
-
-  /* Swap operands if we have a comparison that isn't available in
-     hardware.  */
-  if (d->flag & BUILTIN_DESC_SWAP_OPERANDS)
-    std::swap (op0, op1);
 
   target = gen_reg_rtx (SImode);
   emit_move_insn (target, const0_rtx);
@@ -13194,6 +13277,10 @@ rdseed_step:
 
       return 0;
 
+    case IX86_BUILTIN_VZEROUPPER:
+      cfun->machine->has_explicit_vzeroupper = true;
+      break;
+
     default:
       break;
     }
@@ -13203,6 +13290,14 @@ rdseed_step:
     {
       i = fcode - IX86_BUILTIN__BDESC_SPECIAL_ARGS_FIRST;
       return ix86_expand_special_args_builtin (bdesc_special_args + i, exp,
+					       target);
+    }
+
+  if (fcode >= IX86_BUILTIN__BDESC_PURE_ARGS_FIRST
+      && fcode <= IX86_BUILTIN__BDESC_PURE_ARGS_LAST)
+    {
+      i = fcode - IX86_BUILTIN__BDESC_PURE_ARGS_FIRST;
+      return ix86_expand_special_args_builtin (bdesc_pure_args + i, exp,
 					       target);
     }
 
@@ -19933,6 +20028,32 @@ ix86_vectorize_vec_perm_const (machine_mode vmode, rtx target, rtx op0,
     }
 
   two_args = canonicalize_perm (&d);
+
+  /* If one of the operands is a zero vector, try to match pmovzx.  */
+  if (two_args && (d.op0 == CONST0_RTX (vmode) || d.op1 == CONST0_RTX (vmode)))
+    {
+      struct expand_vec_perm_d dzero = d;
+      if (d.op0 == CONST0_RTX (vmode))
+	{
+	  d.op1 = dzero.op1 = force_reg (vmode, d.op1);
+	  std::swap (dzero.op0, dzero.op1);
+	  for (i = 0; i < nelt; ++i)
+	    dzero.perm[i] ^= nelt;
+	}
+      else
+	d.op0 = dzero.op0 = force_reg (vmode, d.op0);
+
+      if (expand_vselect_vconcat (dzero.target, dzero.op0, dzero.op1,
+				  dzero.perm, nelt, dzero.testing_p))
+	return true;
+    }
+
+  /* Force operands into registers.  */
+  rtx nop0 = force_reg (vmode, d.op0);
+  if (d.op0 == d.op1)
+    d.op1 = nop0;
+  d.op0 = nop0;
+  d.op1 = force_reg (vmode, d.op1);
 
   if (ix86_expand_vec_perm_const_1 (&d))
     return true;

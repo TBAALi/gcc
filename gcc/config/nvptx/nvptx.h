@@ -1,5 +1,5 @@
 /* Target Definitions for NVPTX.
-   Copyright (C) 2014-2020 Free Software Foundation, Inc.
+   Copyright (C) 2014-2021 Free Software Foundation, Inc.
    Contributed by Bernd Schmidt <bernds@codesourcery.com>
 
    This file is part of GCC.
@@ -97,6 +97,8 @@
 #define STACK_SIZE_MODE Pmode
 
 #define TARGET_SM35 (ptx_isa_option >= PTX_ISA_SM35)
+
+#define TARGET_PTX_6_3 (ptx_version_option >= PTX_VERSION_6_3)
 
 /* Registers.  Since ptx is a virtual target, we just define a few
    hard registers for special purposes and leave pseudos unallocated.

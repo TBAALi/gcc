@@ -1,5 +1,5 @@
 /* Data References Analysis and Manipulation Utilities for Vectorization.
-   Copyright (C) 2003-2020 Free Software Foundation, Inc.
+   Copyright (C) 2003-2021 Free Software Foundation, Inc.
    Contributed by Dorit Naishlos <dorit@il.ibm.com>
    and Ira Rosen <irar@il.ibm.com>
 
@@ -780,16 +780,20 @@ vect_slp_analyze_node_dependences (vec_info *vinfo, slp_tree node,
 		 stmt we have to resort to the alias oracle.  */
 	      stmt_vec_info stmt_info = vinfo->lookup_stmt (stmt);
 	      data_reference *dr_b = STMT_VINFO_DATA_REF (stmt_info);
-	      if (!dr_b)
+
+	      /* We are hoisting a load - this means we can use
+		 TBAA for disambiguation.  */
+	      if (!ref_initialized_p)
+		ao_ref_init (&ref, DR_REF (dr_a));
+	      if (stmt_may_clobber_ref_p_1 (stmt, &ref, true))
 		{
-		  /* We are hoisting a load - this means we can use
-		     TBAA for disambiguation.  */
-		  if (!ref_initialized_p)
-		    ao_ref_init (&ref, DR_REF (dr_a));
-		  if (stmt_may_clobber_ref_p_1 (stmt, &ref, true))
+		  if (!dr_b)
 		    return false;
-		  continue;
+		  /* Resort to dependence checking below.  */
 		}
+	      else
+		/* No dependence.  */
+		continue;
 
 	      bool dependent = false;
 	      /* If we run into a store of this same instance (we've just
@@ -2538,7 +2542,11 @@ vect_analyze_group_access_1 (vec_info *vinfo, dr_vec_info *dr_info)
 	 size.  */
       if (DR_IS_READ (dr)
 	  && (dr_step % type_size) == 0
-	  && groupsize > 0)
+	  && groupsize > 0
+	  /* This could be UINT_MAX but as we are generating code in a very
+	     inefficient way we have to cap earlier.
+	     See PR91403 for example.  */
+	  && groupsize <= 4096)
 	{
 	  DR_GROUP_FIRST_ELEMENT (stmt_info) = stmt_info;
 	  DR_GROUP_SIZE (stmt_info) = groupsize;

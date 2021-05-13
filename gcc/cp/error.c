@@ -1,6 +1,6 @@
 /* Call-backs for C++ error reporting.
    This code is non-reentrant.
-   Copyright (C) 1993-2020 Free Software Foundation, Inc.
+   Copyright (C) 1993-2021 Free Software Foundation, Inc.
    This file is part of GCC.
 
 GCC is free software; you can redistribute it and/or modify
@@ -243,9 +243,7 @@ dump_scope (cxx_pretty_printer *pp, tree scope, int flags)
     }
   else if ((flags & TFF_SCOPE) && TREE_CODE (scope) == FUNCTION_DECL)
     {
-      if (DECL_USE_TEMPLATE (scope))
-	f |= TFF_NO_FUNCTION_ARGUMENTS;
-      dump_function_decl (pp, scope, f);
+      dump_function_decl (pp, scope, f | TFF_NO_TEMPLATE_BINDINGS);
       pp_cxx_colon_colon (pp);
     }
 }
@@ -1140,7 +1138,7 @@ dump_decl_name (cxx_pretty_printer *pp, tree t, int flags)
     }
 
   const char *str = IDENTIFIER_POINTER (t);
-  if (!strncmp (str, "_ZGR", 4))
+  if (startswith (str, "_ZGR"))
     {
       pp_cxx_ws_string (pp, "<temporary>");
       return;
@@ -1364,7 +1362,10 @@ dump_decl (cxx_pretty_printer *pp, tree t, int flags)
       break;
 
     case LABEL_DECL:
-      pp_cxx_tree_identifier (pp, DECL_NAME (t));
+      if (DECL_NAME (t))
+	pp_cxx_tree_identifier (pp, DECL_NAME (t));
+      else
+	dump_generic_node (pp, t, 0, TDF_SLIM, false);
       break;
 
     case CONST_DECL:
@@ -2352,7 +2353,8 @@ dump_expr (cxx_pretty_printer *pp, tree t, int flags)
 	if (INDIRECT_REF_P (ob))
 	  {
 	    ob = TREE_OPERAND (ob, 0);
-	    if (!is_this_parameter (ob))
+	    if (!is_this_parameter (ob)
+		&& !is_dummy_object (ob))
 	      {
 		dump_expr (pp, ob, flags | TFF_EXPR_IN_PARENS);
 		if (TYPE_REF_P (TREE_TYPE (ob)))
@@ -2417,32 +2419,8 @@ dump_expr (cxx_pretty_printer *pp, tree t, int flags)
       break;
 
     case MEM_REF:
-      if (TREE_CODE (TREE_OPERAND (t, 0)) == ADDR_EXPR
-	  && integer_zerop (TREE_OPERAND (t, 1)))
-	dump_expr (pp, TREE_OPERAND (TREE_OPERAND (t, 0), 0), flags);
-      else
-	{
-	  pp_cxx_star (pp);
-	  if (!integer_zerop (TREE_OPERAND (t, 1)))
-	    {
-	      pp_cxx_left_paren (pp);
-	      if (!integer_onep (TYPE_SIZE_UNIT
-				 (TREE_TYPE (TREE_TYPE (TREE_OPERAND (t, 0))))))
-		{
-		  pp_cxx_left_paren (pp);
-		  dump_type (pp, ptr_type_node, flags);
-		  pp_cxx_right_paren (pp);
-		}
-	    }
-	  dump_expr (pp, TREE_OPERAND (t, 0), flags);
-	  if (!integer_zerop (TREE_OPERAND (t, 1)))
-	    {
-	      pp_cxx_ws_string (pp, "+");
-	      dump_expr (pp, fold_convert (ssizetype, TREE_OPERAND (t, 1)),
-                         flags);
-	      pp_cxx_right_paren (pp);
-	    }
-	}
+      /* Delegate to the base "C" pretty printer.  */
+      pp->c_pretty_printer::unary_expression (t);
       break;
 
     case TARGET_MEM_REF:

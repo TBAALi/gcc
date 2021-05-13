@@ -1,5 +1,5 @@
 /* Next Runtime (ABI-2) private.
-   Copyright (C) 2011-2020 Free Software Foundation, Inc.
+   Copyright (C) 2011-2021 Free Software Foundation, Inc.
 
    Contributed by Iain Sandoe and based, in part, on an implementation in
    'branches/apple/trunk' contributed by Apple Computer Inc.
@@ -2209,7 +2209,7 @@ has_load_impl (tree clsmeth)
     {
       tree id = METHOD_SEL_NAME (clsmeth);
       if (IDENTIFIER_LENGTH (id) == 4
-	  && strncmp (IDENTIFIER_POINTER (id), "load", 4) == 0)
+	  && startswith (IDENTIFIER_POINTER (id), "load"))
         return true;
       clsmeth = DECL_CHAIN (clsmeth);
     }

@@ -1,5 +1,5 @@
 /* Default target hook functions.
-   Copyright (C) 2003-2020 Free Software Foundation, Inc.
+   Copyright (C) 2003-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -117,7 +117,7 @@ extern opt_machine_mode default_vectorize_related_mode (machine_mode,
 							poly_uint64);
 extern opt_machine_mode default_get_mask_mode (machine_mode);
 extern bool default_empty_mask_is_expensive (unsigned);
-extern void *default_init_cost (class loop *);
+extern void *default_init_cost (class loop *, bool);
 extern unsigned default_add_stmt_cost (class vec_info *, void *, int,
 				       enum vect_cost_for_stmt,
 				       class _stmt_vec_info *, tree, int,
@@ -230,6 +230,9 @@ extern bool default_use_by_pieces_infrastructure_p (unsigned HOST_WIDE_INT,
 						    bool);
 extern int default_compare_by_pieces_branch_ratio (machine_mode);
 
+extern void default_print_patchable_function_entry_1 (FILE *,
+						      unsigned HOST_WIDE_INT,
+						      bool, unsigned int);
 extern void default_print_patchable_function_entry (FILE *,
 						    unsigned HOST_WIDE_INT,
 						    bool);

@@ -6,7 +6,7 @@
  *                                                                          *
  *                          C Implementation File                           *
  *                                                                          *
- *          Copyright (C) 1992-2020, Free Software Foundation, Inc.         *
+ *          Copyright (C) 1992-2021, Free Software Foundation, Inc.         *
  *                                                                          *
  * GNAT is free software;  you can  redistribute it  and/or modify it under *
  * terms of the  GNU General Public License as published  by the Free Soft- *
@@ -434,7 +434,7 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
   gcc_assert (!is_type
 	      || Known_Esize (gnat_entity)
 	      || Has_Size_Clause (gnat_entity)
-	      || (!IN (kind, Numeric_Kind)
+	      || (!Is_In_Numeric_Kind (kind)
 		  && !IN (kind, Enumeration_Kind)
 		  && (!IN (kind, Access_Kind)
 		      || kind == E_Access_Protected_Subprogram_Type
@@ -443,7 +443,7 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
 		      || type_annotate_only)));
 
   /* The RM size must be specified for all discrete and fixed-point types.  */
-  gcc_assert (!(IN (kind, Discrete_Or_Fixed_Point_Kind)
+  gcc_assert (!(Is_In_Discrete_Or_Fixed_Point_Kind (kind)
 		&& Unknown_RM_Size (gnat_entity)));
 
   /* If we get here, it means we have not yet done anything with this entity.
@@ -736,16 +736,7 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
 	if (foreign && Is_Descendant_Of_Address (Underlying_Type (gnat_type)))
 	  gnu_type = ptr_type_node;
 	else
-	  {
-	    gnu_type = gnat_to_gnu_type (gnat_type);
-
-	    /* If this is a standard exception definition, use the standard
-	       exception type.  This is necessary to make sure that imported
-	       and exported views of exceptions are merged in LTO mode.  */
-	    if (TREE_CODE (TYPE_NAME (gnu_type)) == TYPE_DECL
-		&& DECL_NAME (TYPE_NAME (gnu_type)) == exception_data_name_id)
-	      gnu_type = except_type_node;
-	  }
+	  gnu_type = gnat_to_gnu_type (gnat_type);
 
 	/* For a debug renaming declaration, build a debug-only entity.  */
 	if (Present (Debug_Renaming_Link (gnat_entity)))
@@ -2197,14 +2188,16 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
 	  }
 	else
 	  {
+	    /* We make the fields addressable for the sake of compatibility
+	       with languages for which the regular fields are addressable.  */
 	    tem
 	      = create_field_decl (get_identifier ("P_ARRAY"),
 				   ptr_type_node, gnu_fat_type,
-				   NULL_TREE, NULL_TREE, 0, 0);
+				   NULL_TREE, NULL_TREE, 0, 1);
 	    DECL_CHAIN (tem)
 	      = create_field_decl (get_identifier ("P_BOUNDS"),
 				   gnu_ptr_template, gnu_fat_type,
-				   NULL_TREE, NULL_TREE, 0, 0);
+				   NULL_TREE, NULL_TREE, 0, 1);
 	    finish_fat_pointer_type (gnu_fat_type, tem);
 	    SET_TYPE_UNCONSTRAINED_ARRAY (gnu_fat_type, gnu_type);
 	  }
@@ -2327,7 +2320,6 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
 	finish_record_type (gnu_template_type, gnu_template_fields, 0,
 			    debug_info_p);
 	TYPE_CONTEXT (gnu_template_type) = current_function_decl;
-	TYPE_READONLY (gnu_template_type) = 1;
 
 	/* If Component_Size is not already specified, annotate it with the
 	   size of the component.  */
@@ -3054,15 +3046,24 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
 		        || type_annotate_only);
 	  }
 
-	/* Make a node for the record.  If we are not defining the record,
-	   suppress expanding incomplete types.  */
+	/* Make a node for the record type.  */
 	gnu_type = make_node (tree_code_for_record_type (gnat_entity));
 	TYPE_NAME (gnu_type) = gnu_entity_name;
 	TYPE_PACKED (gnu_type) = (packed != 0) || has_align || has_rep;
 	TYPE_REVERSE_STORAGE_ORDER (gnu_type)
 	  = Reverse_Storage_Order (gnat_entity);
+
+	/* If the record type has discriminants, pointers to it may also point
+	   to constrained subtypes of it, so mark it as may_alias for LTO.  */
+	if (has_discr)
+	  prepend_one_attribute
+	    (&attr_list, ATTR_MACHINE_ATTRIBUTE,
+	     get_identifier ("may_alias"), NULL_TREE,
+	     gnat_entity);
+
 	process_attributes (&gnu_type, &attr_list, true, gnat_entity);
 
+	/* If we are not defining it, suppress expanding incomplete types.  */
 	if (!definition)
 	  {
 	    defer_incomplete_level++;
@@ -3394,21 +3395,6 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
 
 	/* Fill in locations of fields.  */
 	annotate_rep (gnat_entity, gnu_type);
-
-	/* If this is a record type associated with an exception definition,
-	   equate its fields to those of the standard exception type.  This
-	   will make it possible to convert between them.  */
-	if (gnu_entity_name == exception_data_name_id)
-	  {
-	    tree gnu_std_field;
-	    for (gnu_field = TYPE_FIELDS (gnu_type),
-		 gnu_std_field = TYPE_FIELDS (except_type_node);
-		 gnu_field;
-		 gnu_field = DECL_CHAIN (gnu_field),
-		 gnu_std_field = DECL_CHAIN (gnu_std_field))
-	      SET_DECL_ORIGINAL_FIELD_TO_FIELD (gnu_field, gnu_std_field);
-	    gcc_assert (!gnu_std_field);
-	  }
       }
       break;
 
@@ -4558,7 +4544,7 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
       /* Similarly, if this is a record type or subtype at global level, call
 	 elaborate_expression_2 on any field position.  Skip any fields that
 	 we haven't made trees for to avoid problems with class-wide types.  */
-      if (IN (kind, Record_Kind) && global_bindings_p ())
+      if (Is_In_Record_Kind (kind) && global_bindings_p ())
 	for (gnat_temp = First_Entity (gnat_entity); Present (gnat_temp);
 	     gnat_temp = Next_Entity (gnat_temp))
 	  if (Ekind (gnat_temp) == E_Component && present_gnu_tree (gnat_temp))
@@ -4703,6 +4689,10 @@ gnat_to_gnu_entity (Entity_Id gnat_entity, tree gnu_expr, bool definition)
 	  const int quals
 	    = TYPE_QUAL_VOLATILE
 	      | (Is_Full_Access (gnat_entity) ? TYPE_QUAL_ATOMIC : 0);
+	  /* This is required by free_lang_data_in_type to disable the ODR.  */
+	  if (TREE_CODE (gnu_type) == ENUMERAL_TYPE)
+	    TYPE_STUB_DECL (gnu_type)
+	      = create_type_stub_decl (TYPE_NAME (gnu_type), gnu_type);
 	  gnu_type = change_qualified_type (gnu_type, quals);
 	}
 
@@ -6045,12 +6035,13 @@ gnat_to_gnu_subprog_type (Entity_Id gnat_subprog, bool definition,
 
 	  /* A pure function in the Ada sense which takes an access parameter
 	     may modify memory through it and thus need be considered neither
-	     const nor pure in the GCC sense.  Likewise it if takes a by-ref
-	     In Out or Out parameter.  But if it takes a by-ref In parameter,
-	     then it may only read memory through it and can be considered
-	     pure in the GCC sense.  */
+	     const nor pure in the GCC sense, unless it's access-to-function.
+	     Likewise it if takes a by-ref In Out or Out parameter.  But if it
+	     takes a by-ref In parameter, then it may only read memory through
+	     it and can be considered pure in the GCC sense.  */
 	  if ((const_flag || pure_flag)
-	      && (POINTER_TYPE_P (gnu_param_type)
+	      && ((POINTER_TYPE_P (gnu_param_type)
+		   && TREE_CODE (TREE_TYPE (gnu_param_type)) != FUNCTION_TYPE)
 		  || TYPE_IS_FAT_POINTER_P (gnu_param_type)))
 	    {
 	      const_flag = false;
@@ -7111,6 +7102,14 @@ gnat_to_gnu_field (Entity_Id gnat_field, tree gnu_record_type, int packed,
   tree gnu_field, gnu_size, gnu_pos;
   bool is_bitfield;
 
+  /* Force the type of the Not_Handled_By_Others field to be that of the
+     field in struct Exception_Data declared in raise.h instead of using
+     the declared boolean type.  We need to do that because there is no
+     easy way to make use of a C compatible boolean type for the latter.  */
+  if (gnu_field_id == not_handled_by_others_name_id
+      && gnu_field_type == boolean_type_node)
+    gnu_field_type = char_type_node;
+
   /* The qualifier to be used in messages.  */
   if (is_aliased)
     field_s = "aliased&";
@@ -7660,7 +7659,7 @@ typedef struct vinfo
    will be the single field of GNU_RECORD_TYPE and the GCC nodes for the
    discriminants will be on GNU_FIELD_LIST.  The other call to this function
    is a recursive call for the component list of a variant and, in this case,
-   GNU_FIELD_LIST is empty.
+   GNU_FIELD_LIST is empty.  Note that GNAT_COMPONENT_LIST may be Empty.
 
    PACKED is 1 if this is for a packed record or -1 if this is for a record
    with Component_Alignment of Storage_Unit.
@@ -7716,7 +7715,8 @@ components_to_record (Node_Id gnat_component_list, Entity_Id gnat_record_type,
   /* For each component referenced in a component declaration create a GCC
      field and add it to the list, skipping pragmas in the GNAT list.  */
   gnu_last = tree_last (gnu_field_list);
-  if (Present (Component_Items (gnat_component_list)))
+  if (Present (gnat_component_list)
+      && (Present (Component_Items (gnat_component_list))))
     for (gnat_component_decl
 	   = First_Non_Pragma (Component_Items (gnat_component_list));
 	 Present (gnat_component_decl);
@@ -7773,7 +7773,10 @@ components_to_record (Node_Id gnat_component_list, Entity_Id gnat_record_type,
       }
 
   /* At the end of the component list there may be a variant part.  */
-  gnat_variant_part = Variant_Part (gnat_component_list);
+  if (Present (gnat_component_list))
+    gnat_variant_part = Variant_Part (gnat_component_list);
+  else
+    gnat_variant_part = Empty;
 
   /* We create a QUAL_UNION_TYPE for the variant part since the variants are
      mutually exclusive and should go in the same memory.  To do this we need
@@ -8320,12 +8323,12 @@ components_to_record (Node_Id gnat_component_list, Entity_Id gnat_record_type,
   if (p_gnu_rep_list && gnu_rep_list)
     *p_gnu_rep_list = chainon (*p_gnu_rep_list, gnu_rep_list);
 
-  /* Deal with the annoying case of an extension of a record with variable size
-     and partial rep clause, for which the _Parent field is forced at offset 0
-     and has variable size, which we do not support below.  Note that we cannot
-     do it if the field has fixed size because we rely on the presence of the
-     REP part built below to trigger the reordering of the fields in a derived
-     record type when all the fields have a fixed position.  */
+  /* Deal with the case of an extension of a record type with variable size and
+     partial rep clause, for which the _Parent field is forced at offset 0 and
+     has variable size.  Note that we cannot do it if the field has fixed size
+     because we rely on the presence of the REP part built below to trigger the
+     reordering of the fields in a derived record type when all the fields have
+     a fixed position.  */
   else if (gnu_rep_list
 	   && !DECL_CHAIN (gnu_rep_list)
 	   && TREE_CODE (DECL_SIZE (gnu_rep_list)) != INTEGER_CST
@@ -8343,33 +8346,52 @@ components_to_record (Node_Id gnat_component_list, Entity_Id gnat_record_type,
      record, before the others, if we also have fields without rep clause.  */
   else if (gnu_rep_list)
     {
-      tree gnu_rep_type, gnu_rep_part;
-      int i, len = list_length (gnu_rep_list);
-      tree *gnu_arr = XALLOCAVEC (tree, len);
+      tree gnu_parent, gnu_rep_type;
 
       /* If all the fields have a rep clause, we can do a flat layout.  */
       layout_with_rep = !gnu_field_list
 			&& (!gnu_variant_part || variants_have_rep);
+
+      /* Same as above but the extension itself has a rep clause, in which case
+	 we need to set aside the _Parent field to lay out the REP part.  */
+      if (TREE_CODE (DECL_SIZE (gnu_rep_list)) != INTEGER_CST
+	  && !layout_with_rep
+	  && !variants_have_rep
+	  && first_free_pos
+	  && integer_zerop (first_free_pos)
+	  && integer_zerop (bit_position (gnu_rep_list)))
+	{
+	  gnu_parent = gnu_rep_list;
+	  gnu_rep_list = DECL_CHAIN (gnu_rep_list);
+	}
+      else
+	gnu_parent = NULL_TREE;
+
       gnu_rep_type
 	= layout_with_rep ? gnu_record_type : make_node (RECORD_TYPE);
 
-      for (gnu_field = gnu_rep_list, i = 0;
-	   gnu_field;
-	   gnu_field = DECL_CHAIN (gnu_field), i++)
-	gnu_arr[i] = gnu_field;
+      /* Sort the fields in order of increasing bit position.  */
+      const int len = list_length (gnu_rep_list);
+      tree *gnu_arr = XALLOCAVEC (tree, len);
+
+      gnu_field = gnu_rep_list;
+      for (int i = 0; i < len; i++)
+	{
+	  gnu_arr[i] = gnu_field;
+	  gnu_field = DECL_CHAIN (gnu_field);
+	}
 
       qsort (gnu_arr, len, sizeof (tree), compare_field_bitpos);
 
-      /* Put the fields in the list in order of increasing position, which
-	 means we start from the end.  */
       gnu_rep_list = NULL_TREE;
-      for (i = len - 1; i >= 0; i--)
+      for (int i = len - 1; i >= 0; i--)
 	{
 	  DECL_CHAIN (gnu_arr[i]) = gnu_rep_list;
 	  gnu_rep_list = gnu_arr[i];
 	  DECL_CONTEXT (gnu_arr[i]) = gnu_rep_type;
 	}
 
+      /* Do the layout of the REP part, if any.  */
       if (layout_with_rep)
 	gnu_field_list = gnu_rep_list;
       else
@@ -8378,13 +8400,35 @@ components_to_record (Node_Id gnat_component_list, Entity_Id gnat_record_type,
 	    = create_concat_name (gnat_record_type, "REP");
 	  TYPE_REVERSE_STORAGE_ORDER (gnu_rep_type)
 	    = TYPE_REVERSE_STORAGE_ORDER (gnu_record_type);
-	  finish_record_type (gnu_rep_type, gnu_rep_list, 1, debug_info);
+	  finish_record_type (gnu_rep_type, gnu_rep_list, 1, false);
 
 	  /* If FIRST_FREE_POS is nonzero, we need to ensure that the fields
 	     without rep clause are laid out starting from this position.
 	     Therefore, we force it as a minimal size on the REP part.  */
-	  gnu_rep_part
+	  tree gnu_rep_part
 	    = create_rep_part (gnu_rep_type, gnu_record_type, first_free_pos);
+
+	  /* If this is an extension, put back the _Parent field as the first
+	     field of the REP part at offset 0 and update its layout.  */
+	  if (gnu_parent)
+	    {
+	      const unsigned int align = DECL_ALIGN (gnu_parent);
+	      DECL_CHAIN (gnu_parent) = TYPE_FIELDS (gnu_rep_type);
+	      TYPE_FIELDS (gnu_rep_type) = gnu_parent;
+	      DECL_CONTEXT (gnu_parent) = gnu_rep_type;
+	      if (align > TYPE_ALIGN (gnu_rep_type))
+		{
+		  SET_TYPE_ALIGN (gnu_rep_type, align);
+		  TYPE_SIZE (gnu_rep_type)
+		    = round_up (TYPE_SIZE (gnu_rep_type), align);
+		  TYPE_SIZE_UNIT (gnu_rep_type)
+		    = round_up (TYPE_SIZE_UNIT (gnu_rep_type), align);
+		  SET_DECL_ALIGN (gnu_rep_part, align);
+		}
+	    }
+
+	  if (debug_info)
+	    rest_of_record_type_compilation (gnu_rep_type);
 
 	  /* Chain the REP part at the beginning of the field list.  */
 	  DECL_CHAIN (gnu_rep_part) = gnu_field_list;

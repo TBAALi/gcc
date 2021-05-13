@@ -2,7 +2,7 @@
    directives to separate functions, converts others into explicit calls to the
    runtime library (libgomp) and so forth
 
-Copyright (C) 2005-2020 Free Software Foundation, Inc.
+Copyright (C) 2005-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -762,6 +762,7 @@ expand_task_call (struct omp_region *region, basic_block bb,
   tree depend = omp_find_clause (clauses, OMP_CLAUSE_DEPEND);
   tree finalc = omp_find_clause (clauses, OMP_CLAUSE_FINAL);
   tree priority = omp_find_clause (clauses, OMP_CLAUSE_PRIORITY);
+  tree detach = omp_find_clause (clauses, OMP_CLAUSE_DETACH);
 
   unsigned int iflags
     = (untied ? GOMP_TASK_FLAG_UNTIED : 0)
@@ -811,8 +812,13 @@ expand_task_call (struct omp_region *region, basic_block bb,
       if (omp_find_clause (clauses, OMP_CLAUSE_REDUCTION))
 	iflags |= GOMP_TASK_FLAG_REDUCTION;
     }
-  else if (priority)
-    iflags |= GOMP_TASK_FLAG_PRIORITY;
+  else
+    {
+      if (priority)
+	iflags |= GOMP_TASK_FLAG_PRIORITY;
+      if (detach)
+	iflags |= GOMP_TASK_FLAG_DETACH;
+    }
 
   tree flags = build_int_cst (unsigned_type_node, iflags);
 
@@ -853,6 +859,11 @@ expand_task_call (struct omp_region *region, basic_block bb,
     priority = integer_zero_node;
 
   gsi = gsi_last_nondebug_bb (bb);
+
+  detach = (detach
+	    ? build_fold_addr_expr (OMP_CLAUSE_DECL (detach))
+	    : null_pointer_node);
+
   tree t = gimple_omp_task_data_arg (entry_stmt);
   if (t == NULL)
     t2 = null_pointer_node;
@@ -875,10 +886,10 @@ expand_task_call (struct omp_region *region, basic_block bb,
 			 num_tasks, priority, startvar, endvar, step);
   else
     t = build_call_expr (builtin_decl_explicit (BUILT_IN_GOMP_TASK),
-			 9, t1, t2, t3,
+			 10, t1, t2, t3,
 			 gimple_omp_task_arg_size (entry_stmt),
 			 gimple_omp_task_arg_align (entry_stmt), cond, flags,
-			 depend, priority);
+			 depend, priority, detach);
 
   force_gimple_operand_gsi (&gsi, t, true, NULL_TREE,
 			    false, GSI_CONTINUE_LINKING);
@@ -1530,7 +1541,7 @@ expand_oacc_collapse_init (const struct omp_for_data *fd,
       tree iter_type = TREE_TYPE (loop->v);
       tree plus_type = iter_type;
 
-      gcc_assert (loop->cond_code == fd->loop.cond_code);
+      gcc_assert (loop->cond_code == LT_EXPR || loop->cond_code == GT_EXPR);
 
       if (POINTER_TYPE_P (iter_type))
 	plus_type = sizetype;
@@ -6349,6 +6360,7 @@ expand_omp_simd (struct omp_region *region, struct omp_for_data *fd)
       n2 = OMP_CLAUSE_DECL (innerc);
     }
   tree step = fd->loop.step;
+  tree orig_step = step; /* May be different from step if is_simt.  */
 
   bool is_simt = omp_find_clause (gimple_omp_for_clauses (fd->for_stmt),
 				  OMP_CLAUSE__SIMT_);
@@ -6499,7 +6511,7 @@ expand_omp_simd (struct omp_region *region, struct omp_for_data *fd)
   tree altv = NULL_TREE, altn2 = NULL_TREE;
   if (fd->collapse == 1
       && !broken_loop
-      && TREE_CODE (fd->loops[0].step) != INTEGER_CST)
+      && TREE_CODE (orig_step) != INTEGER_CST)
     {
       /* The vectorizer currently punts on loops with non-constant steps
 	 for the main IV (can't compute number of iterations and gives up
@@ -6515,7 +6527,7 @@ expand_omp_simd (struct omp_region *region, struct omp_for_data *fd)
 	itype = signed_type_for (itype);
       t = build_int_cst (itype, (fd->loop.cond_code == LT_EXPR ? -1 : 1));
       t = fold_build2 (PLUS_EXPR, itype,
-		       fold_convert (itype, fd->loop.step), t);
+		       fold_convert (itype, step), t);
       t = fold_build2 (PLUS_EXPR, itype, t, fold_convert (itype, n2));
       t = fold_build2 (MINUS_EXPR, itype, t,
 		       fold_convert (itype, fd->loop.v));
@@ -6523,10 +6535,10 @@ expand_omp_simd (struct omp_region *region, struct omp_for_data *fd)
 	t = fold_build2 (TRUNC_DIV_EXPR, itype,
 			 fold_build1 (NEGATE_EXPR, itype, t),
 			 fold_build1 (NEGATE_EXPR, itype,
-				      fold_convert (itype, fd->loop.step)));
+				      fold_convert (itype, step)));
       else
 	t = fold_build2 (TRUNC_DIV_EXPR, itype, t,
-			 fold_convert (itype, fd->loop.step));
+			 fold_convert (itype, step));
       t = fold_convert (TREE_TYPE (altv), t);
       altn2 = create_tmp_var (TREE_TYPE (altv));
       expand_omp_build_assign (&gsi, altn2, t);
@@ -6674,7 +6686,7 @@ expand_omp_simd (struct omp_region *region, struct omp_for_data *fd)
   if (is_simt)
     {
       gsi = gsi_start_bb (l2_bb);
-      step = fold_build2 (MINUS_EXPR, TREE_TYPE (step), fd->loop.step, step);
+      step = fold_build2 (MINUS_EXPR, TREE_TYPE (step), orig_step, step);
       if (POINTER_TYPE_P (type))
 	t = fold_build_pointer_plus (fd->loop.v, step);
       else

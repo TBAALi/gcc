@@ -22,7 +22,7 @@ from itertools import takewhile
 
 from dateutil.parser import parse
 
-from git_commit import GitCommit, GitInfo
+from git_commit import GitCommit, GitInfo, decode_path
 
 from unidiff import PatchSet, PatchedFile
 
@@ -32,7 +32,7 @@ unidiff_supports_renaming = hasattr(PatchedFile(), 'is_rename')
 
 
 class GitEmail(GitCommit):
-    def __init__(self, filename, strict=False):
+    def __init__(self, filename):
         self.filename = filename
         diff = PatchSet.from_filename(filename)
         date = None
@@ -52,8 +52,8 @@ class GitEmail(GitCommit):
         modified_files = []
         for f in diff:
             # Strip "a/" and "b/" prefixes
-            source = f.source_file[2:]
-            target = f.target_file[2:]
+            source = decode_path(f.source_file)[2:]
+            target = decode_path(f.target_file)[2:]
 
             if f.is_added_file:
                 t = 'A'
@@ -66,16 +66,29 @@ class GitEmail(GitCommit):
                 t = 'A'
             else:
                 t = 'M'
-            modified_files.append((target, t))
+            modified_files.append((target if t != 'D' else source, t))
         git_info = GitInfo(None, date, author, body, modified_files)
-        super().__init__(git_info, strict=strict,
+        super().__init__(git_info,
                          commit_to_info_hook=lambda x: None)
 
 
-# With zero arguments, process every patch file in the ./patches directory.
-# With one argument, process the named patch file.
-# Patch files must be in 'git format-patch' format.
+def show_help():
+    print("""usage: git_email.py [--help] [patch file ...]
+
+Check git ChangeLog format of a patch
+
+With zero arguments, process every patch file in the
+./patches directory.
+With one argument, process the named patch file.
+
+Patch files must be in 'git format-patch' format.""")
+    sys.exit(0)
+
+
 if __name__ == '__main__':
+    if len(sys.argv) == 2 and (sys.argv[1] == '-h' or sys.argv[1] == '--help'):
+        show_help()
+
     if len(sys.argv) == 1:
         allfiles = []
         for root, _dirs, files in os.walk('patches'):

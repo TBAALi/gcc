@@ -1,5 +1,5 @@
 /* Vectorizer
-   Copyright (C) 2003-2020 Free Software Foundation, Inc.
+   Copyright (C) 2003-2021 Free Software Foundation, Inc.
    Contributed by Dorit Naishlos <dorit@il.ibm.com>
 
 This file is part of GCC.
@@ -695,6 +695,7 @@ vec_info::new_stmt_vec_info (gimple *stmt)
   STMT_VINFO_REDUC_FN (res) = IFN_LAST;
   STMT_VINFO_REDUC_IDX (res) = -1;
   STMT_VINFO_SLP_VECT_ONLY (res) = false;
+  STMT_VINFO_SLP_VECT_ONLY_PATTERN (res) = false;
   STMT_VINFO_VEC_STMTS (res) = vNULL;
 
   if (is_a <loop_vec_info> (this)

@@ -1,5 +1,5 @@
 /* Definitions of target machine for GNU compiler, for IBM RS/6000.
-   Copyright (C) 1992-2020 Free Software Foundation, Inc.
+   Copyright (C) 1992-2021 Free Software Foundation, Inc.
    Contributed by Richard Kenner (kenner@vlsi1.ultra.nyu.edu)
 
    This file is part of GCC.
@@ -539,6 +539,7 @@ extern int rs6000_vector_align[];
 #define MASK_UPDATE			OPTION_MASK_UPDATE
 #define MASK_VSX			OPTION_MASK_VSX
 #define MASK_POWER10			OPTION_MASK_POWER10
+#define MASK_P10_FUSION			OPTION_MASK_P10_FUSION
 
 #ifndef IN_LIBGCC2
 #define MASK_POWERPC64			OPTION_MASK_POWERPC64
@@ -640,8 +641,9 @@ extern unsigned char rs6000_recip_bits[];
 #define TARGET_CPU_CPP_BUILTINS() \
   rs6000_cpu_cpp_builtins (pfile)
 
-/* Target CPU versions for D.  */
+/* Target hooks for D language.  */
 #define TARGET_D_CPU_VERSIONS rs6000_d_target_versions
+#define TARGET_D_REGISTER_CPU_TARGET_INFO rs6000_d_register_target_info
 
 /* This is used by rs6000_cpu_cpp_builtins to indicate the byte order
    we're compiling for.  Some configurations may need to override it.  */

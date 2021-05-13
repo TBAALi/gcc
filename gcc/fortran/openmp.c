@@ -1,5 +1,5 @@
 /* OpenMP directive matching and resolving.
-   Copyright (C) 2005-2020 Free Software Foundation, Inc.
+   Copyright (C) 2005-2021 Free Software Foundation, Inc.
    Contributed by Jakub Jelinek
 
 This file is part of GCC.
@@ -91,6 +91,7 @@ gfc_free_omp_clauses (gfc_omp_clauses *c)
   gfc_free_expr (c->hint);
   gfc_free_expr (c->num_tasks);
   gfc_free_expr (c->priority);
+  gfc_free_expr (c->detach);
   for (i = 0; i < OMP_IF_LAST; i++)
     gfc_free_expr (c->if_exprs[i]);
   gfc_free_expr (c->async_expr);
@@ -260,6 +261,7 @@ gfc_match_omp_variable_list (const char *str, gfc_omp_namelist **list,
 	case MATCH_YES:
 	  gfc_expr *expr;
 	  expr = NULL;
+	  gfc_gobble_whitespace ();
 	  if ((allow_sections && gfc_peek_ascii_char () == '(')
 	      || (allow_derived && gfc_peek_ascii_char () == '%'))
 	    {
@@ -446,6 +448,39 @@ cleanup:
   gfc_free_omp_namelist (head);
   gfc_current_locus = old_loc;
   return MATCH_ERROR;
+}
+
+/* Match detach(event-handle).  */
+
+static match
+gfc_match_omp_detach (gfc_expr **expr)
+{
+  locus old_loc = gfc_current_locus;
+
+  if (gfc_match ("detach ( ") != MATCH_YES)
+    goto syntax_error;
+
+  if (gfc_match_variable (expr, 0) != MATCH_YES)
+    goto syntax_error;
+
+  if ((*expr)->ts.type != BT_INTEGER || (*expr)->ts.kind != gfc_c_intptr_kind)
+    {
+      gfc_error ("%qs at %L should be of type "
+		 "integer(kind=omp_event_handle_kind)",
+		 (*expr)->symtree->n.sym->name, &(*expr)->where);
+      return MATCH_ERROR;
+    }
+
+  if (gfc_match_char (')') != MATCH_YES)
+    goto syntax_error;
+
+  return MATCH_YES;
+
+syntax_error:
+   gfc_error ("Syntax error in OpenMP detach clause at %C");
+   gfc_current_locus = old_loc;
+   return MATCH_ERROR;
+
 }
 
 /* Match depend(sink : ...) construct a namelist from it.  */
@@ -807,6 +842,7 @@ enum omp_mask1
   OMP_CLAUSE_ATOMIC,  /* OpenMP 5.0.  */
   OMP_CLAUSE_CAPTURE,  /* OpenMP 5.0.  */
   OMP_CLAUSE_MEMORDER,  /* OpenMP 5.0.  */
+  OMP_CLAUSE_DETACH,  /* OpenMP 5.0.  */
   OMP_CLAUSE_NOWAIT,
   /* This must come last.  */
   OMP_MASK1_LAST
@@ -840,7 +876,6 @@ enum omp_mask2
   OMP_CLAUSE_IF_PRESENT,
   OMP_CLAUSE_FINALIZE,
   OMP_CLAUSE_ATTACH,
-  OMP_CLAUSE_DETACH,
   /* This must come last.  */
   OMP_MASK2_LAST
 };
@@ -1347,6 +1382,10 @@ gfc_match_omp_clauses (gfc_omp_clauses **cp, const omp_mask mask,
 		depend_op = OMP_DEPEND_IN;
 	      else if (gfc_match ("out") == MATCH_YES)
 		depend_op = OMP_DEPEND_OUT;
+	      else if (gfc_match ("mutexinoutset") == MATCH_YES)
+		depend_op = OMP_DEPEND_MUTEXINOUTSET;
+	      else if (gfc_match ("depobj") == MATCH_YES)
+		depend_op = OMP_DEPEND_DEPOBJ;
 	      else if (!c->depend_source
 		       && gfc_match ("source )") == MATCH_YES)
 		{
@@ -1378,6 +1417,12 @@ gfc_match_omp_clauses (gfc_omp_clauses **cp, const omp_mask mask,
 		gfc_current_locus = old_loc;
 	    }
 	  if ((mask & OMP_CLAUSE_DETACH)
+	      && !openacc
+	      && !c->detach
+	      && gfc_match_omp_detach (&c->detach) == MATCH_YES)
+	    continue;
+	  if ((mask & OMP_CLAUSE_DETACH)
+	      && openacc
 	      && gfc_match ("detach ( ") == MATCH_YES
 	      && gfc_match_omp_map_clause (&c->lists[OMP_LIST_MAP],
 					   OMP_MAP_DETACH, false,
@@ -2763,7 +2808,8 @@ cleanup:
   (omp_mask (OMP_CLAUSE_PRIVATE) | OMP_CLAUSE_FIRSTPRIVATE		\
    | OMP_CLAUSE_SHARED | OMP_CLAUSE_IF | OMP_CLAUSE_DEFAULT		\
    | OMP_CLAUSE_UNTIED | OMP_CLAUSE_FINAL | OMP_CLAUSE_MERGEABLE	\
-   | OMP_CLAUSE_DEPEND | OMP_CLAUSE_PRIORITY | OMP_CLAUSE_IN_REDUCTION)
+   | OMP_CLAUSE_DEPEND | OMP_CLAUSE_PRIORITY | OMP_CLAUSE_IN_REDUCTION	\
+   | OMP_CLAUSE_DETACH)
 #define OMP_TASKLOOP_CLAUSES \
   (omp_mask (OMP_CLAUSE_PRIVATE) | OMP_CLAUSE_FIRSTPRIVATE		\
    | OMP_CLAUSE_LASTPRIVATE | OMP_CLAUSE_SHARED | OMP_CLAUSE_IF		\
@@ -2857,6 +2903,86 @@ gfc_match_omp_end_critical (void)
   return MATCH_YES;
 }
 
+/* depobj(depobj) depend(dep-type:loc)|destroy|update(dep-type)
+   dep-type = in/out/inout/mutexinoutset/depobj/source/sink
+   depend: !source, !sink
+   update: !source, !sink, !depobj
+   locator = exactly one list item  .*/
+match
+gfc_match_omp_depobj (void)
+{
+  gfc_omp_clauses *c = NULL;
+  gfc_expr *depobj;
+
+  if (gfc_match (" ( %v ) ", &depobj) != MATCH_YES)
+    {
+      gfc_error ("Expected %<( depobj )%> at %C");
+      return MATCH_ERROR;
+    }
+  if (gfc_match ("update ( ") == MATCH_YES)
+    {
+      c = gfc_get_omp_clauses ();
+      if (gfc_match ("inout )") == MATCH_YES)
+	c->depobj_update = OMP_DEPEND_INOUT;
+      else if (gfc_match ("in )") == MATCH_YES)
+	c->depobj_update = OMP_DEPEND_IN;
+      else if (gfc_match ("out )") == MATCH_YES)
+	c->depobj_update = OMP_DEPEND_OUT;
+      else if (gfc_match ("mutexinoutset )") == MATCH_YES)
+	c->depobj_update = OMP_DEPEND_MUTEXINOUTSET;
+      else
+	{
+	  gfc_error ("Expected IN, OUT, INOUT, MUTEXINOUTSET followed by "
+		     "%<)%> at %C");
+	  goto error;
+	}
+    }
+  else if (gfc_match ("destroy") == MATCH_YES)
+    {
+      c = gfc_get_omp_clauses ();
+      c->destroy = true;
+    }
+  else if (gfc_match_omp_clauses (&c, omp_mask (OMP_CLAUSE_DEPEND), true, false)
+	   != MATCH_YES)
+    goto error;
+
+  if (c->depobj_update == OMP_DEPEND_UNSET && !c->destroy)
+    {
+      if (!c->depend_source && !c->lists[OMP_LIST_DEPEND])
+	{
+	  gfc_error ("Expected DEPEND, UPDATE, or DESTROY clause at %C");
+	  goto error;
+	}
+      if (c->depend_source
+	  || c->lists[OMP_LIST_DEPEND]->u.depend_op == OMP_DEPEND_SINK_FIRST
+	  || c->lists[OMP_LIST_DEPEND]->u.depend_op == OMP_DEPEND_SINK
+	  || c->lists[OMP_LIST_DEPEND]->u.depend_op == OMP_DEPEND_DEPOBJ)
+	{
+	  gfc_error ("DEPEND clause at %L of OMP DEPOBJ construct shall not "
+		     "have dependence-type SOURCE, SINK or DEPOBJ",
+		     c->lists[OMP_LIST_DEPEND]
+		     ? &c->lists[OMP_LIST_DEPEND]->where : &gfc_current_locus);
+	  goto error;
+	}
+      if (c->lists[OMP_LIST_DEPEND]->next)
+	{
+	  gfc_error ("DEPEND clause at %L of OMP DEPOBJ construct shall have "
+		     "only a single locator",
+		     &c->lists[OMP_LIST_DEPEND]->next->where);
+	  goto error;
+	}
+    }
+
+  c->depobj = depobj;
+  new_st.op = EXEC_OMP_DEPOBJ;
+  new_st.ext.omp_clauses = c;
+  return MATCH_YES;
+
+error:
+  gfc_free_expr (depobj);
+  gfc_free_omp_clauses (c);
+  return MATCH_ERROR;
+}
 
 match
 gfc_match_omp_distribute (void)
@@ -3747,11 +3873,11 @@ gfc_omp_requires_add_clause (gfc_omp_requires_kind clause,
       if (clause & OMP_REQ_ATOMIC_MEM_ORDER_MASK)
 	gfc_error ("!$OMP REQUIRES clause %<atomic_default_mem_order(%s)%> "
 		   "specified via module %qs use at %L but same clause is "
-		   "not set at for the program unit", clause_name, module_name,
-		   loc);
+		   "not specified for the program unit", clause_name,
+		   module_name, loc);
       else
 	gfc_error ("!$OMP REQUIRES clause %qs specified via module %qs use at "
-		   "%L but same clause is not set at for the program unit",
+		   "%L but same clause is not specified for the program unit",
 		   clause_name, module_name, loc);
       return false;
     }
@@ -4836,6 +4962,14 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 		   "clause at %L", &code->loc);
     }
 
+  if (omp_clauses->depobj
+      && (!gfc_resolve_expr (omp_clauses->depobj)
+	  || omp_clauses->depobj->ts.type != BT_INTEGER
+	  || omp_clauses->depobj->ts.kind != 2 * gfc_index_integer_kind
+	  || omp_clauses->depobj->rank != 0))
+    gfc_error ("DEPOBJ in DEPOBJ construct at %L shall be a scalar integer "
+	       "of OMP_DEPEND_KIND kind", &omp_clauses->depobj->where);
+
   /* Check that no symbol appears on multiple clauses, except that
      a symbol can appear on both firstprivate and lastprivate.  */
   for (list = 0; list < OMP_LIST_NUM; list++)
@@ -5061,6 +5195,10 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 		if (n->sym->attr.associate_var)
 		  gfc_error ("ASSOCIATE name %qs in SHARED clause at %L",
 			     n->sym->name, &n->where);
+		if (omp_clauses->detach
+		    && n->sym == omp_clauses->detach->symtree->n.sym)
+		  gfc_error ("DETACH event handle %qs in SHARED clause at %L",
+			     n->sym->name, &n->where);
 	      }
 	    break;
 	  case OMP_LIST_ALIGNED:
@@ -5128,18 +5266,52 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 		      gfc_error ("Only SOURCE or SINK dependence types "
 				 "are allowed on ORDERED directive at %L",
 				 &n->where);
+		    else if (n->u.depend_op == OMP_DEPEND_DEPOBJ
+			     && !n->expr
+			     && (n->sym->ts.type != BT_INTEGER
+				 || n->sym->ts.kind
+				    != 2 * gfc_index_integer_kind
+				 || n->sym->attr.dimension))
+		      gfc_error ("Locator %qs at %L in DEPEND clause of depobj "
+				 "type shall be a scalar integer of "
+				 "OMP_DEPEND_KIND kind", n->sym->name,
+				 &n->where);
+		    else if (n->u.depend_op == OMP_DEPEND_DEPOBJ
+			     && n->expr
+			     && (!gfc_resolve_expr (n->expr)
+				 || n->expr->ts.type != BT_INTEGER
+				 || n->expr->ts.kind
+				    != 2 * gfc_index_integer_kind
+				 || n->expr->rank != 0))
+		      gfc_error ("Locator at %L in DEPEND clause of depobj "
+				 "type shall be a scalar integer of "
+				 "OMP_DEPEND_KIND kind", &n->expr->where);
 		  }
-		gfc_ref *array_ref = NULL;
+		gfc_ref *lastref = NULL, *lastslice = NULL;
 		bool resolved = false;
 		if (n->expr)
 		  {
-		    array_ref = n->expr->ref;
+		    lastref = n->expr->ref;
 		    resolved = gfc_resolve_expr (n->expr);
 
 		    /* Look through component refs to find last array
 		       reference.  */
 		    if (resolved)
 		      {
+			for (gfc_ref *ref = n->expr->ref; ref; ref = ref->next)
+			  if (ref->type == REF_COMPONENT
+			      || ref->type == REF_SUBSTRING
+			      || ref->type == REF_INQUIRY)
+			    lastref = ref;
+			  else if (ref->type == REF_ARRAY)
+			    {
+			      for (int i = 0; i < ref->u.ar.dimen; i++)
+				if (ref->u.ar.dimen_type[i] == DIMEN_RANGE)
+				  lastslice = ref;
+
+			      lastref = ref;
+			    }
+
 			/* The "!$acc cache" directive allows rectangular
 			   subarrays to be specified, with some restrictions
 			   on the form of bounds (not implemented).
@@ -5147,39 +5319,51 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 			   array isn't contiguous.  An expression such as
 			   arr(-n:n,-n:n) could be contiguous even if it looks
 			   like it may not be.  */
-			if (list != OMP_LIST_CACHE
+			if (code->op != EXEC_OACC_UPDATE
+			    && list != OMP_LIST_CACHE
 			    && list != OMP_LIST_DEPEND
 			    && !gfc_is_simply_contiguous (n->expr, false, true)
-			    && gfc_is_not_contiguous (n->expr))
+			    && gfc_is_not_contiguous (n->expr)
+			    && !(lastslice
+				 && (lastslice->next
+				     || lastslice->type != REF_ARRAY)))
 			  gfc_error ("Array is not contiguous at %L",
 				     &n->where);
-
-			while (array_ref
-			       && (array_ref->type == REF_COMPONENT
-				   || (array_ref->type == REF_ARRAY
-				       && array_ref->next
-				       && (array_ref->next->type
-					   == REF_COMPONENT))))
-			  array_ref = array_ref->next;
 		      }
 		  }
-		if (array_ref
+		if (lastref
 		    || (n->expr
 			&& (!resolved || n->expr->expr_type != EXPR_VARIABLE)))
 		  {
-		    if (!resolved
-			|| n->expr->expr_type != EXPR_VARIABLE
-			|| array_ref->next
-			|| array_ref->type != REF_ARRAY)
+		    if (!lastslice
+			&& lastref
+			&& lastref->type == REF_SUBSTRING)
+		      gfc_error ("Unexpected substring reference in %s clause "
+				 "at %L", name, &n->where);
+		    else if (!lastslice
+			     && lastref
+			     && lastref->type == REF_INQUIRY)
+		      {
+			gcc_assert (lastref->u.i == INQUIRY_RE
+				    || lastref->u.i == INQUIRY_IM);
+			gfc_error ("Unexpected complex-parts designator "
+				   "reference in %s clause at %L",
+				   name, &n->where);
+		      }
+		    else if (!resolved
+			     || n->expr->expr_type != EXPR_VARIABLE
+			     || (lastslice
+				 && (lastslice->next
+				     || lastslice->type != REF_ARRAY)))
 		      gfc_error ("%qs in %s clause at %L is not a proper "
 				 "array section", n->sym->name, name,
 				 &n->where);
-		    else
+		    else if (lastslice)
 		      {
 			int i;
-			gfc_array_ref *ar = &array_ref->u.ar;
+			gfc_array_ref *ar = &lastslice->u.ar;
 			for (i = 0; i < ar->dimen; i++)
-			  if (ar->stride[i])
+			  if (ar->stride[i] && code->op != EXEC_OACC_UPDATE)
 			    {
 			      gfc_error ("Stride should not be specified for "
 					 "array section in %s clause at %L",
@@ -5300,22 +5484,25 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 		}
 	    break;
 	  case OMP_LIST_IS_DEVICE_PTR:
-	    if (!n->sym->attr.dummy)
-	      gfc_error ("Non-dummy object %qs in %s clause at %L",
-			 n->sym->name, name, &n->where);
-	    if (n->sym->attr.allocatable
-		|| (n->sym->ts.type == BT_CLASS
-		    && CLASS_DATA (n->sym)->attr.allocatable))
-	      gfc_error ("ALLOCATABLE object %qs in %s clause at %L",
-			 n->sym->name, name, &n->where);
-	    if (n->sym->attr.pointer
-		|| (n->sym->ts.type == BT_CLASS
-		    && CLASS_DATA (n->sym)->attr.pointer))
-	      gfc_error ("POINTER object %qs in %s clause at %L",
-			 n->sym->name, name, &n->where);
-	    if (n->sym->attr.value)
-	      gfc_error ("VALUE object %qs in %s clause at %L",
-			 n->sym->name, name, &n->where);
+	    for (n = omp_clauses->lists[list]; n != NULL; n = n->next)
+	      {
+		if (!n->sym->attr.dummy)
+		  gfc_error ("Non-dummy object %qs in %s clause at %L",
+			     n->sym->name, name, &n->where);
+		if (n->sym->attr.allocatable
+		    || (n->sym->ts.type == BT_CLASS
+			&& CLASS_DATA (n->sym)->attr.allocatable))
+		  gfc_error ("ALLOCATABLE object %qs in %s clause at %L",
+			     n->sym->name, name, &n->where);
+		if (n->sym->attr.pointer
+		    || (n->sym->ts.type == BT_CLASS
+			&& CLASS_DATA (n->sym)->attr.pointer))
+		  gfc_error ("POINTER object %qs in %s clause at %L",
+			     n->sym->name, name, &n->where);
+		if (n->sym->attr.value)
+		  gfc_error ("VALUE object %qs in %s clause at %L",
+			     n->sym->name, name, &n->where);
+	      }
 	    break;
 	  case OMP_LIST_USE_DEVICE_PTR:
 	  case OMP_LIST_USE_DEVICE_ADDR:
@@ -5337,7 +5524,7 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 		if (has_inscan && has_notinscan && is_reduction)
 		  {
 		    gfc_error ("%<inscan%> and non-%<inscan%> %<reduction%> "
-			       "clauses on the same construct %L",
+			       "clauses on the same construct at %L",
 			       &n->where);
 		    break;
 		  }
@@ -5387,7 +5574,13 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 		    default:
 		      break;
 		    }
-
+		if (omp_clauses->detach
+		    && (list == OMP_LIST_PRIVATE
+			|| list == OMP_LIST_FIRSTPRIVATE
+			|| list == OMP_LIST_LASTPRIVATE)
+		    && n->sym == omp_clauses->detach->symtree->n.sym)
+		  gfc_error ("DETACH event handle %qs in %s clause at %L",
+			     n->sym->name, name, &n->where);
 		switch (list)
 		  {
 		  case OMP_LIST_REDUCTION_INSCAN:
@@ -5606,6 +5799,38 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 	    break;
 	  }
       }
+  /* OpenMP 5.1: use_device_ptr acts like use_device_addr, except for
+     type(c_ptr).  */
+  if (omp_clauses->lists[OMP_LIST_USE_DEVICE_PTR])
+    {
+      gfc_omp_namelist *n_prev, *n_next, *n_addr;
+      n_addr = omp_clauses->lists[OMP_LIST_USE_DEVICE_ADDR];
+      for (; n_addr && n_addr->next; n_addr = n_addr->next)
+	;
+      n_prev = NULL;
+      n = omp_clauses->lists[OMP_LIST_USE_DEVICE_PTR];
+      while (n)
+	{
+	  n_next = n->next;
+	  if (n->sym->ts.type != BT_DERIVED
+	      || n->sym->ts.u.derived->ts.f90_type != BT_VOID)
+	    {
+	      n->next = NULL;
+	      if (n_addr)
+		n_addr->next = n;
+	      else
+		omp_clauses->lists[OMP_LIST_USE_DEVICE_ADDR] = n;
+	      n_addr = n;
+	      if (n_prev)
+		n_prev->next = n_next;
+	      else
+		omp_clauses->lists[OMP_LIST_USE_DEVICE_PTR] = n_next;
+	    }
+	  else
+	    n_prev = n;
+	  n = n_next;
+	}
+    }
   if (omp_clauses->safelen_expr)
     resolve_positive_int_expr (omp_clauses->safelen_expr, "SAFELEN");
   if (omp_clauses->simdlen_expr)
@@ -5684,6 +5909,9 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
 	gfc_error ("%s must contain at least one MAP clause at %L",
 		   p, &code->loc);
     }
+  if (!openacc && omp_clauses->mergeable && omp_clauses->detach)
+    gfc_error ("%<DETACH%> clause at %L must not be used together with "
+	       "%<MERGEABLE%> clause", &omp_clauses->detach->where);
 }
 
 
@@ -7096,6 +7324,7 @@ gfc_resolve_omp_directive (gfc_code *code, gfc_namespace *ns)
     case EXEC_OMP_TASK:
     case EXEC_OMP_TEAMS:
     case EXEC_OMP_WORKSHARE:
+    case EXEC_OMP_DEPOBJ:
       if (code->ext.omp_clauses)
 	resolve_omp_clauses (code, code->ext.omp_clauses, NULL);
       break;

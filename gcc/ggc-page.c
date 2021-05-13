@@ -1,5 +1,5 @@
 /* "Bag-of-pages" garbage collector for the GNU compiler.
-   Copyright (C) 1999-2020 Free Software Foundation, Inc.
+   Copyright (C) 1999-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -1513,6 +1513,12 @@ gt_ggc_m_S (const void *p)
 
 void
 gt_ggc_mx (const char *& x)
+{
+  gt_ggc_m_S (x);
+}
+
+void
+gt_ggc_mx (char *& x)
 {
   gt_ggc_m_S (x);
 }

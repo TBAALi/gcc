@@ -1,5 +1,5 @@
 /* Target code for NVPTX.
-   Copyright (C) 2014-2020 Free Software Foundation, Inc.
+   Copyright (C) 2014-2021 Free Software Foundation, Inc.
    Contributed by Bernd Schmidt <bernds@codesourcery.com>
 
    This file is part of GCC.
@@ -74,6 +74,7 @@
 #include "cfgloop.h"
 #include "fold-const.h"
 #include "intl.h"
+#include "opts.h"
 
 /* This file should be included last.  */
 #include "target-def.h"
@@ -219,7 +220,10 @@ nvptx_option_override (void)
     flag_no_common = 1;
 
   /* The patch area requires nops, which we don't have.  */
-  if (function_entry_patch_area_size > 0)
+  HOST_WIDE_INT patch_area_size, patch_area_entry;
+  parse_and_check_patch_area (flag_patchable_function_entry, false,
+			      &patch_area_size, &patch_area_entry);
+  if (patch_area_size > 0)
     sorry ("not generating patch area, nops not supported");
 
   /* Assumes that it will see only hard registers.  */
@@ -3678,9 +3682,9 @@ nvptx_sese_pseudo (basic_block me, bb_sese *sese, int depth, int dir,
   edge e;
   edge_iterator ei;
   int hi_back = depth;
-  pseudo_node_t node_back (0, depth);
+  pseudo_node_t node_back (nullptr, depth);
   int hi_child = depth;
-  pseudo_node_t node_child (0, depth);
+  pseudo_node_t node_child (nullptr, depth);
   basic_block child = NULL;
   unsigned num_children = 0;
   int usd = -dir * sese->dir;
@@ -3747,7 +3751,7 @@ nvptx_sese_pseudo (basic_block me, bb_sese *sese, int depth, int dir,
       else
 	{ /* Fallen off graph, backlink to entry node.  */
 	  hi_back = 0;
-	  node_back = pseudo_node_t (0, 0);
+	  node_back = pseudo_node_t (nullptr, 0);
 	}
     }
 
@@ -3768,7 +3772,7 @@ nvptx_sese_pseudo (basic_block me, bb_sese *sese, int depth, int dir,
       else
 	{
 	  /* back edge to entry node */
-	  sese->push (pseudo_node_t (0, 0));
+	  sese->push (pseudo_node_t (nullptr, 0));
 	}
     }
   
@@ -3777,7 +3781,7 @@ nvptx_sese_pseudo (basic_block me, bb_sese *sese, int depth, int dir,
   if (!sese->brackets.length () || !edges || !edges->length ())
     {
       hi_back = 0;
-      node_back = pseudo_node_t (0, 0);
+      node_back = pseudo_node_t (nullptr, 0);
       sese->push (node_back);
     }
 
@@ -5305,7 +5309,10 @@ static void
 nvptx_file_start (void)
 {
   fputs ("// BEGIN PREAMBLE\n", asm_out_file);
-  fputs ("\t.version\t3.1\n", asm_out_file);
+  if (TARGET_PTX_6_3)
+    fputs ("\t.version\t6.3\n", asm_out_file);
+  else
+    fputs ("\t.version\t3.1\n", asm_out_file);
   if (TARGET_SM35)
     fputs ("\t.target\tsm_35\n", asm_out_file);
   else

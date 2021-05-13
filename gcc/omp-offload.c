@@ -1,7 +1,7 @@
 /* Bits of OpenMP and OpenACC handling that is specific to device offloading
    and a lowering pass for OpenACC device directives.
 
-   Copyright (C) 2005-2020 Free Software Foundation, Inc.
+   Copyright (C) 2005-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -926,6 +926,35 @@ oacc_validate_dims (tree fn, tree attrs, int *dims, int level, unsigned used)
       tree val = TREE_VALUE (pos);
       dims[ix] = val ? TREE_INT_CST_LOW (val) : -1;
       pos = TREE_CHAIN (pos);
+    }
+
+  bool check = true;
+#ifdef ACCEL_COMPILER
+  check = false;
+#endif
+  if (check
+      && warn_openacc_parallelism
+      && !lookup_attribute ("oacc kernels", DECL_ATTRIBUTES (fn)))
+    {
+      static char const *const axes[] =
+      /* Must be kept in sync with GOMP_DIM enumeration.  */
+	{ "gang", "worker", "vector" };
+      for (ix = level >= 0 ? level : 0; ix != GOMP_DIM_MAX; ix++)
+	if (dims[ix] < 0)
+	  ; /* Defaulting axis.  */
+	else if ((used & GOMP_DIM_MASK (ix)) && dims[ix] == 1)
+	  /* There is partitioned execution, but the user requested a
+	     dimension size of 1.  They're probably confused.  */
+	  warning_at (DECL_SOURCE_LOCATION (fn), OPT_Wopenacc_parallelism,
+		      "region contains %s partitioned code but"
+		      " is not %s partitioned", axes[ix], axes[ix]);
+	else if (!(used & GOMP_DIM_MASK (ix)) && dims[ix] != 1)
+	  /* The dimension is explicitly partitioned to non-unity, but
+	     no use is made within the region.  */
+	  warning_at (DECL_SOURCE_LOCATION (fn), OPT_Wopenacc_parallelism,
+		      "region is %s partitioned but"
+		      " does not contain %s partitioned code",
+		      axes[ix], axes[ix]);
     }
 
   bool changed = targetm.goacc.validate_dims (fn, dims, level, used);

@@ -1,6 +1,6 @@
 // Implementation of std::function -*- C++ -*-
 
-// Copyright (C) 2004-2020 Free Software Foundation, Inc.
+// Copyright (C) 2004-2021 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -630,7 +630,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 	    }
 	  return nullptr;
 	}
-      // @}
+      /// @}
 
     private:
       using _Invoker_type = _Res (*)(const _Any_data&, _ArgTypes&&...);

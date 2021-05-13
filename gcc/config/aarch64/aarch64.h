@@ -1,5 +1,5 @@
 /* Machine description for AArch64 architecture.
-   Copyright (C) 2009-2020 Free Software Foundation, Inc.
+   Copyright (C) 2009-2021 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GCC.
@@ -26,8 +26,9 @@
 #define TARGET_CPU_CPP_BUILTINS()	\
   aarch64_cpu_cpp_builtins (pfile)
 
-/* Target CPU versions for D.  */
+/* Target hooks for D language.  */
 #define TARGET_D_CPU_VERSIONS aarch64_d_target_versions
+#define TARGET_D_REGISTER_CPU_TARGET_INFO aarch64_d_register_target_info
 
 
 

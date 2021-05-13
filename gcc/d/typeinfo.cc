@@ -1,5 +1,5 @@
 /* typeinfo.cc -- D runtime type identification.
-   Copyright (C) 2013-2020 Free Software Foundation, Inc.
+   Copyright (C) 2013-2021 Free Software Foundation, Inc.
 
 GCC is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -210,7 +210,7 @@ make_frontend_typeinfo (Identifier *ident, ClassDeclaration *base = NULL)
   ClassDeclaration *tinfo = ClassDeclaration::create (loc, ident, NULL, NULL,
 						      true);
   tinfo->parent = object_module;
-  tinfo->semantic (object_module->_scope);
+  dsymbolSemantic (tinfo, object_module->_scope);
   tinfo->baseClass = base;
   /* This is a compiler generated class, and shouldn't be mistaken for being
      the type declared in the runtime library.  */
@@ -358,7 +358,7 @@ class TypeInfoVisitor : public Visitor
     DECL_EXTERNAL (decl) = 0;
     TREE_PUBLIC (decl) = 1;
     DECL_VISIBILITY (decl) = VISIBILITY_INTERNAL;
-    d_comdat_linkage (decl);
+    set_linkage_for_decl (decl);
     d_pushdecl (decl);
 
     return decl;
@@ -1013,9 +1013,6 @@ public:
 	void function(void*) xdtor;
 	void function(void*) xpostblit;
 	uint m_align;
-	version (X86_64)
-	    TypeInfo m_arg1;
-	    TypeInfo m_arg2;
 	immutable(void)* xgetRTInfo;  */
 
   void visit (TypeInfoStructDeclaration *d)
@@ -1090,19 +1087,6 @@ public:
 
     /* uint m_align;  */
     this->layout_field (build_integer_cst (ti->alignsize (), d_uint_type));
-
-    if (global.params.is64bit)
-      {
-	/* TypeInfo m_arg1;  */
-	tree arg1type = (sd->arg1type) ? build_typeinfo (d->loc, sd->arg1type)
-	  : null_pointer_node;
-	this->layout_field (arg1type);
-
-	/* TypeInfo m_arg2;  */
-	tree arg2type = (sd->arg2type) ? build_typeinfo (d->loc, sd->arg2type)
-	  : null_pointer_node;
-	this->layout_field (arg2type);
-      }
 
     /* immutable(void)* xgetRTInfo;  */
     if (sd->getRTInfo)
@@ -1336,14 +1320,6 @@ public:
 
     DECL_CONTEXT (tid->csym) = d_decl_context (tid);
     TREE_READONLY (tid->csym) = 1;
-
-    /* Built-in typeinfo will be referenced as one-only.  */
-    gcc_assert (!tid->isInstantiated ());
-
-    if (builtin_typeinfo_p (tid->tinfo))
-      d_linkonce_linkage (tid->csym);
-    else
-      d_comdat_linkage (tid->csym);
   }
 
   void visit (TypeInfoClassDeclaration *tid)
@@ -1483,8 +1459,6 @@ get_cpp_typeinfo_decl (ClassDeclaration *decl)
     = TREE_TYPE (build_ctype (decl->type));
   TREE_READONLY (decl->cpp_type_info_ptr_sym) = 1;
 
-  d_comdat_linkage (decl->cpp_type_info_ptr_sym);
-
   /* Layout the initializer and emit the symbol.  */
   layout_cpp_typeinfo (decl);
 
@@ -1588,9 +1562,6 @@ create_typeinfo (Type *type, Module *mod)
 	case TK_STRUCT_TYPE:
 	  if (!tinfo_types[tk])
 	    {
-	      /* Some ABIs add extra TypeInfo fields on the end.  */
-	      tree argtype = global.params.is64bit ? ptr_type_node : NULL_TREE;
-
 	      ident = Identifier::idPool ("TypeInfo_Struct");
 	      make_internal_typeinfo (tk, ident,
 				      array_type_node, array_type_node,
@@ -1598,7 +1569,7 @@ create_typeinfo (Type *type, Module *mod)
 				      ptr_type_node, ptr_type_node,
 				      d_uint_type, ptr_type_node,
 				      ptr_type_node, d_uint_type,
-				      ptr_type_node, argtype, argtype, NULL);
+				      ptr_type_node, NULL);
 	    }
 	  t->vtinfo = TypeInfoStructDeclaration::create (t);
 	  break;

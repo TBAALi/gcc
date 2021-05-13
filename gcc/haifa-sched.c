@@ -1,5 +1,5 @@
 /* Instruction scheduling pass.
-   Copyright (C) 1992-2020 Free Software Foundation, Inc.
+   Copyright (C) 1992-2021 Free Software Foundation, Inc.
    Contributed by Michael Tiemann (tiemann@cygnus.com) Enhanced by,
    and currently maintained by, Jim Wilson (wilson@cygnus.com)
 
@@ -7255,10 +7255,6 @@ free_global_sched_pressure_data (void)
 void
 sched_init (void)
 {
-  /* Disable speculative loads in their presence if cc0 defined.  */
-  if (HAVE_cc0)
-  flag_schedule_speculative_load = 0;
-
   if (targetm.sched.dispatch (NULL, IS_DISPATCH_ON))
     targetm.sched.dispatch_do (NULL, DISPATCH_INIT);
 

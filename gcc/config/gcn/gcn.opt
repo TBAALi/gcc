@@ -1,6 +1,6 @@
 ; Options for the GCN port of the compiler.
 
-; Copyright (C) 2016-2020 Free Software Foundation, Inc.
+; Copyright (C) 2016-2021 Free Software Foundation, Inc.
 ;
 ; This file is part of GCC.
 ;
@@ -33,6 +33,9 @@ Enum(gpu_type) String(gfx900) Value(PROCESSOR_VEGA10)
 
 EnumValue
 Enum(gpu_type) String(gfx906) Value(PROCESSOR_VEGA20)
+
+EnumValue
+Enum(gpu_type) String(gfx908) Value(PROCESSOR_GFX908)
 
 march=
 Target RejectNegative Joined ToLower Enum(gpu_type) Var(gcn_arch) Init(PROCESSOR_FIJI)

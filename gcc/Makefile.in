@@ -1,7 +1,7 @@
 # Makefile for GNU Compiler Collection
 # Run 'configure' to generate Makefile from Makefile.in
 
-# Copyright (C) 1987-2020 Free Software Foundation, Inc.
+# Copyright (C) 1987-2021 Free Software Foundation, Inc.
 
 #This file is part of GCC.
 
@@ -415,6 +415,7 @@ CPPINC = -I$(srcdir)/../libcpp/include
 
 CODYLIB = ../libcody/libcody.a
 CODYINC = -I$(srcdir)/../libcody
+NETLIBS = @NETLIBS@
 
 # Where to find decNumber
 enable_decimal_float = @enable_decimal_float@
@@ -448,6 +449,9 @@ USER_H = $(srcdir)/ginclude/float.h \
 
 USER_H_INC_NEXT_PRE = @user_headers_inc_next_pre@
 USER_H_INC_NEXT_POST = @user_headers_inc_next_post@
+
+# Enable target overriding of this fragment, as in config/t-vxworks.
+T_GLIMITS_H = $(srcdir)/glimits.h
 
 # The GCC to use for compiling crt*.o.
 # Usually the one we just built.
@@ -956,7 +960,7 @@ BASIC_BLOCK_H = basic-block.h $(PREDICT_H) $(VEC_H) $(FUNCTION_H) \
 GIMPLE_H = gimple.h gimple.def gsstruct.def $(VEC_H) \
 	$(GGC_H) $(BASIC_BLOCK_H) $(TREE_H) tree-ssa-operands.h \
 	tree-ssa-alias.h $(INTERNAL_FN_H) $(HASH_TABLE_H) is-a.h
-GCOV_IO_H = gcov-io.h gcov-iov.h auto-host.h gcov-counter.def
+GCOV_IO_H = gcov-io.h version.h auto-host.h gcov-counter.def
 RECOG_H = recog.h
 EMIT_RTL_H = emit-rtl.h
 FLAGS_H = flags.h flag-types.h $(OPTIONS_H)
@@ -1020,6 +1024,13 @@ PLUGIN_H = plugin.h $(GCC_PLUGIN_H)
 PLUGIN_VERSION_H = plugin-version.h configargs.h
 CONTEXT_H = context.h
 GENSUPPORT_H = gensupport.h read-md.h optabs.def
+RTL_SSA_H = $(PRETTY_PRINT_H) insn-config.h splay-tree-utils.h \
+	    $(RECOG_H) $(REGS_H) function-abi.h obstack-utils.h \
+	    mux-utils.h rtlanal.h memmodel.h $(EMIT_RTL_H) \
+	    rtl-ssa/accesses.h rtl-ssa/insns.h rtl-ssa/blocks.h \
+	    rtl-ssa/changes.h rtl-ssa/functions.h rtl-ssa/is-a.inl \
+	    rtl-ssa/access-utils.h rtl-ssa/insn-utils.h rtl-ssa/movement.h \
+	    rtl-ssa/change-utils.h rtl-ssa/member-fns.inl
 
 #
 # Now figure out from those variables how to compile and link.
@@ -1243,6 +1254,7 @@ ANALYZER_OBJS = \
 	analyzer/constraint-manager.o \
 	analyzer/diagnostic-manager.o \
 	analyzer/engine.o \
+	analyzer/feasible-graph.o \
 	analyzer/function-set.o \
 	analyzer/pending-diagnostic.o \
 	analyzer/program-point.o \
@@ -1262,7 +1274,8 @@ ANALYZER_OBJS = \
 	analyzer/state-purge.o \
 	analyzer/store.o \
 	analyzer/supergraph.o \
-	analyzer/svalue.o
+	analyzer/svalue.o \
+	analyzer/trimmed-graph.o
 
 # Language-independent object files.
 # We put the *-match.o and insn-*.o files first so that a parallel make
@@ -1433,6 +1446,7 @@ OBJS = \
 	ipa-split.o \
 	ipa-inline.o \
 	ipa-comdats.o \
+	ipa-free-lang-data.o \
 	ipa-visibility.o \
 	ipa-inline-analysis.o \
 	ipa-inline-transform.o \
@@ -1698,7 +1712,7 @@ OBJS-libcommon = diagnostic.o diagnostic-color.o diagnostic-show-locus.o \
 	edit-context.o \
 	pretty-print.o intl.o \
 	sbitmap.o \
-	vec.o input.o version.o hash-table.o ggc-none.o memory-block.o \
+	vec.o input.o hash-table.o ggc-none.o memory-block.o \
 	selftest.o selftest-diagnostic.o sort.o
 
 # Objects in libcommon-target.a, used by drivers and by the core
@@ -1729,7 +1743,7 @@ endif
 ALL_HOST_OBJS = $(ALL_HOST_FRONTEND_OBJS) $(ALL_HOST_BACKEND_OBJS)
 
 BACKEND = libbackend.a main.o libcommon-target.a libcommon.a \
-	$(CPPLIB) $(CODYLIB) $(LIBDECNUMBER)
+	$(CPPLIB) $(LIBDECNUMBER)
 
 # This is defined to "yes" if Tree checking is enabled, which roughly means
 # front-end checking.
@@ -1750,7 +1764,7 @@ MOSTLYCLEANFILES = insn-flags.h insn-config.h insn-codes.h \
  $(EXTRA_PROGRAMS) gcc-cross$(exeext) \
  $(SPECS) collect2$(exeext) gcc-ar$(exeext) gcc-nm$(exeext) \
  gcc-ranlib$(exeext) \
- gcov-iov$(build_exeext) gcov$(exeext) gcov-dump$(exeext) \
+ genversion$(build_exeext) gcov$(exeext) gcov-dump$(exeext) \
  gcov-tool$(exeect) \
  gengtype$(exeext) *.[0-9][0-9].* *.[si] *-checksum.c libbackend.a \
  libcommon-target.a libcommon.a libgcc.mk perf.data
@@ -1789,7 +1803,7 @@ DO_LINK_SERIALIZATION = @DO_LINK_SERIALIZATION@
 ifeq ($(DO_LINK_SERIALIZATION),)
 LINK_PROGRESS = :
 else
-LINK_PROGRESS = msg="Linking |"; cnt=0; if test "$(2)" = start; then \
+LINK_PROGRESS = msg="Linking $@ |"; cnt=0; if test "$(2)" = start; then \
   idx=0; cnt2=$(DO_LINK_SERIALIZATION); \
   while test $$cnt2 -le $(1); do msg="$${msg}=="; cnt2=`expr $$cnt2 + 1`; idx=`expr $$idx + 1`; done; \
   cnt=$$idx; \
@@ -2131,7 +2145,7 @@ checksum-options:
 # Build libgcc.a.
 
 libgcc-support: libgcc.mvars stmp-int-hdrs $(TCONFIG_H) \
-	$(MACHMODE_H) gcov-iov.h
+	$(MACHMODE_H) version.h
 
 libgcc.mvars: config.status Makefile specs xgcc$(exeext)
 	: > tmp-libgcc.mvars
@@ -2319,12 +2333,6 @@ s-options-h: optionlist $(srcdir)/opt-functions.awk $(srcdir)/opt-read.awk \
 	$(STAMP) $@
 
 dumpvers: dumpvers.c
-
-CFLAGS-version.o += -DBASEVER=$(BASEVER_s) -DDATESTAMP=$(DATESTAMP_s) \
-	-DREVISION=$(REVISION_s) \
-	-DDEVPHASE=$(DEVPHASE_s) -DPKGVERSION=$(PKGVERSION_s) \
-	-DBUGURL=$(BUGURL_s)
-version.o: $(REVISION) $(DATESTAMP) $(BASEVER) $(DEVPHASE)
 
 # lto-compress.o needs $(ZLIBINC) added to the include flags.
 CFLAGS-lto-compress.o += $(ZLIBINC) $(ZSTD_INC)
@@ -2742,7 +2750,7 @@ generated_files = config.h tm.h $(TM_P_H) $(TM_D_H) $(TM_H) multilib.h \
        $(simple_generated_h) specs.h \
        tree-check.h genrtl.h insn-modes.h insn-modes-inline.h \
        tm-preds.h tm-constrs.h \
-       $(ALL_GTFILES_H) gtype-desc.c gtype-desc.h gcov-iov.h \
+       $(ALL_GTFILES_H) gtype-desc.c gtype-desc.h version.h \
        options.h target-hooks-def.h insn-opinit.h \
        common/common-target-hooks-def.h pass-instances.def \
        c-family/c-target-hooks-def.h d/d-target-hooks-def.h \
@@ -2755,16 +2763,6 @@ generated_files = config.h tm.h $(TM_P_H) $(TM_D_H) $(TM_H) multilib.h \
 build/%.o :  # dependencies provided by explicit rule later
 	$(COMPILER_FOR_BUILD) -c $(BUILD_COMPILERFLAGS) $(BUILD_CPPFLAGS) \
 		-o $@ $<
-
-## build/version.o is compiled by the $(COMPILER_FOR_BUILD) but needs
-## several C macro definitions, just like version.o
-build/version.o:  version.c version.h \
-                  $(REVISION) $(DATESTAMP) $(BASEVER) $(DEVPHASE)
-	$(COMPILER_FOR_BUILD) -c $(BUILD_COMPILERFLAGS) $(BUILD_CPPFLAGS) \
-	-DBASEVER=$(BASEVER_s) -DDATESTAMP=$(DATESTAMP_s) \
-	-DREVISION=$(REVISION_s) \
-	-DDEVPHASE=$(DEVPHASE_s) -DPKGVERSION=$(PKGVERSION_s) \
-	-DBUGURL=$(BUGURL_s) -o $@ $<
 
 # Header dependencies for the programs that generate source code.
 # These are library modules...
@@ -2944,10 +2942,10 @@ build/genmatch$(build_exeext) : $(BUILD_CPPLIB) \
 
 # These programs are not linked with the MD reader.
 build/gengtype$(build_exeext) : build/gengtype-lex.o build/gengtype-parse.o \
-              build/gengtype-state.o build/version.o build/errors.o
+              build/gengtype-state.o build/errors.o
 
 gengtype$(exeext) : gengtype.o gengtype-lex.o gengtype-parse.o \
-              gengtype-state.o version.o errors.o $(LIBDEPS)
+              gengtype-state.o errors.o $(LIBDEPS)
 	+$(LINKER) $(ALL_LINKERFLAGS) $(LDFLAGS) -o $@ \
 	    $(filter-out ($LIBDEPS), $^) $(LIBS)
 
@@ -3026,20 +3024,23 @@ CFLAGS-cppdefault.o += $(PREPROCESSOR_DEFINES)
 # Note for the stamp targets, we run the program `true' instead of
 # having an empty command (nothing following the semicolon).
 
-# gcov-iov.c is run on the build machine to generate gcov-iov.h from version.c
-build/gcov-iov.o: gcov-iov.c $(BCONFIG_H) $(CORETYPES_H) $(GTM_H) \
-  $(SYSTEM_H) $(CORETYPES_H) $(TM_H)
+# genversion.c is run on the build machine to generate version.h
+CFLAGS-build/genversion.o += -DBASEVER=$(BASEVER_s) -DDATESTAMP=$(DATESTAMP_s) \
+	-DREVISION=$(REVISION_s) \
+	-DDEVPHASE=$(DEVPHASE_s) -DPKGVERSION=$(PKGVERSION_s) \
+	-DBUGURL=$(BUGURL_s)
 
-build/gcov-iov$(build_exeext): build/gcov-iov.o
+build/genversion.o: genversion.c $(BCONFIG_H) $(SYSTEM_H)
+
+build/genversion$(build_exeext): build/genversion.o
 	+$(LINKER_FOR_BUILD) $(BUILD_LINKERFLAGS) $(BUILD_LDFLAGS) \
-		build/gcov-iov.o -o $@
+		build/genversion.o -o $@
 
-gcov-iov.h: s-iov; @true
-s-iov: build/gcov-iov$(build_exeext) $(BASEVER) $(DEVPHASE)
-	build/gcov-iov$(build_exeext) '$(BASEVER_c)' '$(DEVPHASE_c)' \
-	    > tmp-gcov-iov.h
-	$(SHELL) $(srcdir)/../move-if-change tmp-gcov-iov.h gcov-iov.h
-	$(STAMP) s-iov
+version.h: s-version; @true
+s-version: build/genversion$(build_exeext)
+	build/genversion$(build_exeext) > tmp-version.h
+	$(SHELL) $(srcdir)/../move-if-change tmp-version.h version.h
+	$(STAMP) s-version
 
 # gcov.o needs $(ZLIBINC) added to the include flags.
 CFLAGS-gcov.o += $(ZLIBINC)
@@ -3075,7 +3076,7 @@ gcov-tool$(exeext): $(GCOV_TOOL_OBJS) $(LIBDEPS)
 # be rebuilt.
 
 # Build the include directories.
-stmp-int-hdrs: $(STMP_FIXINC) $(USER_H) fixinc_list
+stmp-int-hdrs: $(STMP_FIXINC) $(T_GLIMITS_H) $(USER_H) fixinc_list
 # Copy in the headers provided with gcc.
 #
 # The sed command gets just the last file name component;
@@ -3129,9 +3130,9 @@ stmp-int-hdrs: $(STMP_FIXINC) $(USER_H) fixinc_list
 	  multi_dir=`echo $${ml} | sed -e 's/^[^;]*;//'`; \
 	  fix_dir=include-fixed$${multi_dir}; \
 	  if $(LIMITS_H_TEST) ; then \
-	    cat $(srcdir)/limitx.h $(srcdir)/glimits.h $(srcdir)/limity.h > tmp-xlimits.h; \
+	    cat $(srcdir)/limitx.h $(T_GLIMITS_H) $(srcdir)/limity.h > tmp-xlimits.h; \
 	  else \
-	    cat $(srcdir)/glimits.h > tmp-xlimits.h; \
+	    cat $(T_GLIMITS_H) > tmp-xlimits.h; \
 	  fi; \
 	  $(mkinstalldirs) $${fix_dir}; \
 	  chmod a+rx $${fix_dir} || true; \

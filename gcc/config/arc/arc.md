@@ -1,5 +1,5 @@
 ;; Machine description of the Synopsys DesignWare ARC cpu for GNU C compiler
-;; Copyright (C) 1994-2020 Free Software Foundation, Inc.
+;; Copyright (C) 1994-2021 Free Software Foundation, Inc.
 
 ;; Sources derived from work done by Sankhya Technologies (www.sankhya.com) on
 ;; behalf of Synopsys Inc.
@@ -128,6 +128,7 @@
   UNSPEC_ARC_DMACHU
   UNSPEC_ARC_DMACWH
   UNSPEC_ARC_DMACWHU
+  UNSPEC_ARC_DMPYWH
   UNSPEC_ARC_QMACH
   UNSPEC_ARC_QMACHU
   UNSPEC_ARC_QMPYH
@@ -4396,24 +4397,20 @@ core_3, archs4x, archs4xd, archs4xd_slow"
 ;; Instructions generated through builtins
 
 (define_insn "clrsbsi2"
-  [(set (match_operand:SI  0 "dest_reg_operand" "=w,w")
-	(clrsb:SI (match_operand:SI 1 "general_operand" "cL,Cal")))]
+  [(set (match_operand:SI  0 "dest_reg_operand" "=r,r")
+	(clrsb:SI (match_operand:SI 1 "general_operand" "rL,Cal")))]
   "TARGET_NORM"
-  "@
-   norm \t%0, %1
-   norm \t%0, %1"
+  "norm\\t%0,%1"
   [(set_attr "length" "4,8")
    (set_attr "type" "two_cycle_core,two_cycle_core")])
 
 (define_insn "norm_f"
-  [(set (match_operand:SI  0 "dest_reg_operand" "=w,w")
-	(clrsb:SI (match_operand:SI 1 "general_operand" "cL,Cal")))
+  [(set (match_operand:SI  0 "dest_reg_operand" "=r,r")
+	(clrsb:SI (match_operand:SI 1 "general_operand" "rL,Cal")))
    (set (reg:CC_ZN CC_REG)
 	(compare:CC_ZN (match_dup 1) (const_int 0)))]
   "TARGET_NORM"
-  "@
-   norm.f\t%0, %1
-   norm.f\t%0, %1"
+  "norm.f\\t%0,%1"
   [(set_attr "length" "4,8")
    (set_attr "type" "two_cycle_core,two_cycle_core")])
 
@@ -4443,7 +4440,17 @@ core_3, archs4x, archs4xd, archs4xd_slow"
 	  (clz:SI (match_operand:SI 1 "register_operand" "")))
      (clobber (match_dup 2))])]
   "TARGET_NORM"
-  "operands[2] = gen_rtx_REG (CC_ZNmode, CC_REG);")
+  "
+   if (TARGET_V2)
+    {
+      /* ARCv2's FLS is a bit more optimal than using norm.  */
+      rtx tmp = gen_reg_rtx (SImode);
+      emit_insn (gen_fls (tmp, operands[1]));
+      emit_insn (gen_subsi3 (operands[0], GEN_INT (31), tmp));
+      DONE;
+    }
+   operands[2] = gen_rtx_REG (CC_ZNmode, CC_REG);
+  ")
 
 (define_insn_and_split "*arc_clzsi2"
   [(set (match_operand:SI 0 "register_operand" "=r")
@@ -4475,8 +4482,13 @@ core_3, archs4x, archs4xd, archs4xd_slow"
    (match_operand:SI 1 "register_operand" "")]
   "TARGET_NORM"
   "
-  emit_insn (gen_arc_ctzsi2 (operands[0], operands[1]));
-  DONE;
+   if (TARGET_V2)
+    {
+      emit_insn (gen_ffs (operands[0], operands[1]));
+      DONE;
+    }
+   emit_insn (gen_arc_ctzsi2 (operands[0], operands[1]));
+   DONE;
 ")
 
 (define_insn_and_split "arc_ctzsi2"
@@ -5575,26 +5587,22 @@ core_3, archs4x, archs4xd, archs4xd_slow"
    (set_attr "type" "misc")])
 
 (define_insn "ffs"
-  [(set (match_operand:SI  0 "dest_reg_operand" "=w,w")
-	(unspec:SI [(match_operand:SI 1 "general_operand" "cL,Cal")]
+  [(set (match_operand:SI  0 "dest_reg_operand" "=r,r")
+	(unspec:SI [(match_operand:SI 1 "general_operand" "rL,Cal")]
 			    UNSPEC_ARC_FFS))]
   "TARGET_NORM && TARGET_V2"
-  "@
-   ffs \t%0, %1
-   ffs \t%0, %1"
+  "ffs\\t%0,%1"
   [(set_attr "length" "4,8")
    (set_attr "type" "two_cycle_core,two_cycle_core")])
 
 (define_insn "ffs_f"
-  [(set (match_operand:SI  0 "dest_reg_operand" "=w,w")
-	(unspec:SI [(match_operand:SI 1 "general_operand" "cL,Cal")]
+  [(set (match_operand:SI  0 "dest_reg_operand" "=r,r")
+	(unspec:SI [(match_operand:SI 1 "general_operand" "rL,Cal")]
 			    UNSPEC_ARC_FFS))
    (set (reg:CC_ZN CC_REG)
 	(compare:CC_ZN (match_dup 1) (const_int 0)))]
   "TARGET_NORM && TARGET_V2"
-  "@
-   ffs.f\t%0, %1
-   ffs.f\t%0, %1"
+  "ffs.f\\t%0,%1"
   [(set_attr "length" "4,8")
    (set_attr "type" "two_cycle_core,two_cycle_core")])
 
@@ -6177,12 +6185,12 @@ core_3, archs4x, archs4xd, archs4xd_slow"
    rtx acc_reg = gen_rtx_REG (DImode, ACC_REG_FIRST);
    emit_move_insn (acc_reg, operands[3]);
    if (TARGET_PLUS_MACD && even_register_operand (operands[0], DImode)
-       && REGNO (operands[0]) != ACCL_REGNO)
+       && REGNO (operands[0]) != ACC_REG_FIRST)
       emit_insn (gen_macd (operands[0], operands[1], operands[2]));
    else
      {
       emit_insn (gen_mac (operands[1], operands[2]));
-      if (REGNO (operands[0]) != ACCL_REGNO)
+      if (REGNO (operands[0]) != ACC_REG_FIRST)
         emit_move_insn (operands[0], acc_reg);
      }
    DONE;
@@ -6279,12 +6287,12 @@ core_3, archs4x, archs4xd, archs4xd_slow"
    rtx acc_reg = gen_rtx_REG (DImode, ACC_REG_FIRST);
    emit_move_insn (acc_reg, operands[3]);
    if (TARGET_PLUS_MACD && even_register_operand (operands[0], DImode)
-       && REGNO (operands[0]) != ACCL_REGNO)
+       && REGNO (operands[0]) != ACC_REG_FIRST)
       emit_insn (gen_macdu (operands[0], operands[1], operands[2]));
    else
      {
       emit_insn (gen_macu (operands[1], operands[2]));
-      if (REGNO (operands[0]) != ACCL_REGNO)
+      if (REGNO (operands[0]) != ACC_REG_FIRST)
         emit_move_insn (operands[0], acc_reg);
      }
    DONE;

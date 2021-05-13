@@ -1,5 +1,5 @@
 /* Classes for modeling the state of memory.
-   Copyright (C) 2019-2020 Free Software Foundation, Inc.
+   Copyright (C) 2019-2021 Free Software Foundation, Inc.
    Contributed by David Malcolm <dmalcolm@redhat.com>.
 
 This file is part of GCC.
@@ -378,10 +378,13 @@ public:
 		region_model_context *ctxt);
 
   region_model_context *get_ctxt () const { return m_ctxt; }
+  uncertainty_t *get_uncertainty () const;
   tree get_lhs_type () const { return m_lhs_type; }
   const region *get_lhs_region () const { return m_lhs_region; }
 
   bool maybe_set_lhs (const svalue *result) const;
+
+  unsigned num_args () const;
 
   tree get_arg_tree (unsigned idx) const;
   tree get_arg_type (unsigned idx) const;
@@ -411,11 +414,6 @@ class region_model
   region_model (region_model_manager *mgr);
   region_model (const region_model &other);
   ~region_model ();
-
-#if 0//__cplusplus >= 201103
-  region_model (region_model &&other);
-#endif
-
   region_model &operator= (const region_model &other);
 
   bool operator== (const region_model &other) const;
@@ -442,7 +440,8 @@ class region_model
   void on_assignment (const gassign *stmt, region_model_context *ctxt);
   const svalue *get_gassign_result (const gassign *assign,
 				    region_model_context *ctxt);
-  bool on_call_pre (const gcall *stmt, region_model_context *ctxt);
+  bool on_call_pre (const gcall *stmt, region_model_context *ctxt,
+		    bool *out_terminate_path);
   void on_call_post (const gcall *stmt,
 		     bool unknown_side_effects,
 		     region_model_context *ctxt);
@@ -455,19 +454,24 @@ class region_model
 				region_model_context *ctxt);
   bool impl_call_builtin_expect (const call_details &cd);
   bool impl_call_calloc (const call_details &cd);
+  bool impl_call_error (const call_details &cd, unsigned min_args,
+			bool *out_terminate_path);
   void impl_call_free (const call_details &cd);
   bool impl_call_malloc (const call_details &cd);
   void impl_call_memcpy (const call_details &cd);
   bool impl_call_memset (const call_details &cd);
+  void impl_call_realloc (const call_details &cd);
   void impl_call_strcpy (const call_details &cd);
   bool impl_call_strlen (const call_details &cd);
   bool impl_call_operator_new (const call_details &cd);
   bool impl_call_operator_delete (const call_details &cd);
+  void impl_deallocation_call (const call_details &cd);
 
   void handle_unrecognized_call (const gcall *call,
 				 region_model_context *ctxt);
   void get_reachable_svalues (svalue_set *out,
-			      const svalue *extra_sval);
+			      const svalue *extra_sval,
+			      const uncertainty_t *uncertainty);
 
   void on_return (const greturn *stmt, region_model_context *ctxt);
   void on_setjmp (const gcall *stmt, const exploded_node *enode,
@@ -511,7 +515,7 @@ class region_model
   void clobber_region (const region *reg);
   void purge_region (const region *reg);
   void zero_fill_region (const region *reg);
-  void mark_region_as_unknown (const region *reg);
+  void mark_region_as_unknown (const region *reg, uncertainty_t *uncertainty);
 
   void copy_region (const region *dst_reg, const region *src_reg,
 		    region_model_context *ctxt);
@@ -579,6 +583,13 @@ class region_model
  private:
   const region *get_lvalue_1 (path_var pv, region_model_context *ctxt);
   const svalue *get_rvalue_1 (path_var pv, region_model_context *ctxt);
+
+  path_var
+  get_representative_path_var_1 (const svalue *sval,
+				 svalue_set *visited) const;
+  path_var
+  get_representative_path_var_1 (const region *reg,
+				 svalue_set *visited) const;
 
   void add_any_constraints_from_ssa_def_stmt (tree lhs,
 					      enum tree_code op,
@@ -684,6 +695,8 @@ class region_model_context
 
   /* Hook for clients to be notified when a function_decl escapes.  */
   virtual void on_escaped_function (tree fndecl) = 0;
+
+  virtual uncertainty_t *get_uncertainty () = 0;
 };
 
 /* A "do nothing" subclass of region_model_context.  */
@@ -712,6 +725,8 @@ public:
   void on_unexpected_tree_code (tree, const dump_location_t &) OVERRIDE {}
 
   void on_escaped_function (tree) OVERRIDE {}
+
+  uncertainty_t *get_uncertainty () OVERRIDE { return NULL; }
 };
 
 /* A subclass of region_model_context for determining if operations fail

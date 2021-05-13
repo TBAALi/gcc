@@ -1,5 +1,5 @@
 /* Vectorizer
-   Copyright (C) 2003-2020 Free Software Foundation, Inc.
+   Copyright (C) 2003-2021 Free Software Foundation, Inc.
    Contributed by Dorit Naishlos <dorit@il.ibm.com>
 
 This file is part of GCC.
@@ -1215,6 +1215,10 @@ public:
 
   /* True if this is only suitable for SLP vectorization.  */
   bool slp_vect_only_p;
+
+  /* True if this is a pattern that can only be handled by SLP
+     vectorization.  */
+  bool slp_vect_pattern_only_p;
 };
 
 /* Information about a gather/scatter call.  */
@@ -1301,6 +1305,7 @@ struct gather_scatter_info {
 #define STMT_VINFO_REDUC_VECTYPE(S)     (S)->reduc_vectype
 #define STMT_VINFO_REDUC_VECTYPE_IN(S)  (S)->reduc_vectype_in
 #define STMT_VINFO_SLP_VECT_ONLY(S)     (S)->slp_vect_only_p
+#define STMT_VINFO_SLP_VECT_ONLY_PATTERN(S) (S)->slp_vect_pattern_only_p
 
 #define DR_GROUP_FIRST_ELEMENT(S) \
   (gcc_checking_assert ((S)->dr_aux.dr), (S)->first_element)
@@ -1450,9 +1455,9 @@ int vect_get_stmt_cost (enum vect_cost_for_stmt type_of_cost)
 /* Alias targetm.vectorize.init_cost.  */
 
 static inline void *
-init_cost (class loop *loop_info)
+init_cost (class loop *loop_info, bool costing_for_scalar)
 {
-  return targetm.vectorize.init_cost (loop_info);
+  return targetm.vectorize.init_cost (loop_info, costing_for_scalar);
 }
 
 extern void dump_stmt_cost (FILE *, void *, int, enum vect_cost_for_stmt,
@@ -1474,6 +1479,15 @@ add_stmt_cost (vec_info *vinfo, void *data, int count,
     dump_stmt_cost (dump_file, data, count, kind, stmt_info, vectype, misalign,
 		    cost, where);
   return cost;
+}
+
+/* Alias targetm.vectorize.add_stmt_cost.  */
+
+static inline unsigned
+add_stmt_cost (vec_info *vinfo, void *data, stmt_info_for_cost *i)
+{
+  return add_stmt_cost (vinfo, data, i->count, i->kind, i->stmt_info,
+			i->vectype, i->misalign, i->where);
 }
 
 /* Alias targetm.vectorize.finish_cost.  */
@@ -2045,13 +2059,8 @@ typedef enum _complex_perm_kinds {
    PERM_TOP
 } complex_perm_kinds_t;
 
-/* A pair with a load permute and a corresponding complex_perm_kind which gives
-   information about the load it represents.  */
-typedef std::pair<complex_perm_kinds_t, load_permutation_t>
-  complex_load_perm_t;
-
 /* Cache from nodes to the load permutation they represent.  */
-typedef hash_map <slp_tree, complex_load_perm_t>
+typedef hash_map <slp_tree, complex_perm_kinds_t>
   slp_tree_to_load_perm_map_t;
 
 /* Vector pattern matcher base class.  All SLP pattern matchers must inherit

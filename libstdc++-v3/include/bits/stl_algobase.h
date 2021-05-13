@@ -1,6 +1,6 @@
 // Core algorithmic facilities -*- C++ -*-
 
-// Copyright (C) 2001-2020 Free Software Foundation, Inc.
+// Copyright (C) 2001-2021 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -424,7 +424,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 					   is_move_assignable<_Tp>,
 					   is_copy_assignable<_Tp>>;
 	  // trivial types can have deleted assignment
-	  static_assert( __assignable::type::value, "type is not assignable" );
+	  static_assert( __assignable::type::value, "type must be assignable" );
 #endif
 	  const ptrdiff_t _Num = __last - __first;
 	  if (_Num)
@@ -735,7 +735,7 @@ _GLIBCXX_END_NAMESPACE_CONTAINER
 					   is_move_assignable<_Tp>,
 					   is_copy_assignable<_Tp>>;
 	  // trivial types can have deleted assignment
-	  static_assert( __assignable::type::value, "type is not assignable" );
+	  static_assert( __assignable::type::value, "type must be assignable" );
 #endif
 	  const ptrdiff_t _Num = __last - __first;
 	  if (_Num)

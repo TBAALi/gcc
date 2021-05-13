@@ -1,5 +1,5 @@
 /* All matcher functions.
-   Copyright (C) 2003-2020 Free Software Foundation, Inc.
+   Copyright (C) 2003-2021 Free Software Foundation, Inc.
    Contributed by Steven Bosscher
 
 This file is part of GCC.
@@ -160,6 +160,7 @@ match gfc_match_omp_critical (void);
 match gfc_match_omp_declare_reduction (void);
 match gfc_match_omp_declare_simd (void);
 match gfc_match_omp_declare_target (void);
+match gfc_match_omp_depobj (void);
 match gfc_match_omp_distribute (void);
 match gfc_match_omp_distribute_parallel_do (void);
 match gfc_match_omp_distribute_parallel_do_simd (void);

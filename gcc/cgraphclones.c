@@ -1,5 +1,5 @@
 /* Callgraph clones
-   Copyright (C) 2003-2020 Free Software Foundation, Inc.
+   Copyright (C) 2003-2021 Free Software Foundation, Inc.
    Contributed by Jan Hubicka
 
 This file is part of GCC.
@@ -1143,11 +1143,7 @@ cgraph_node::materialize_clone ()
   /* Function is no longer clone.  */
   remove_from_clone_tree ();
   if (!this_clone_of->analyzed && !this_clone_of->clones)
-    {
-      this_clone_of->release_body ();
-      this_clone_of->remove_callees ();
-      this_clone_of->remove_all_references ();
-    }
+    this_clone_of->release_body ();
 }
 
 #include "gt-cgraphclones.h"

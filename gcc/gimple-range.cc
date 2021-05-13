@@ -1,5 +1,5 @@
 /* Code for GIMPLE range related routines.
-   Copyright (C) 2019-2020 Free Software Foundation, Inc.
+   Copyright (C) 2019-2021 Free Software Foundation, Inc.
    Contributed by Andrew MacLeod <amacleod@redhat.com>
    and Aldy Hernandez <aldyh@redhat.com>.
 
@@ -737,7 +737,7 @@ range_of_builtin_call (range_query &query, irange &r, gcall *call)
 
       query.range_of_expr (r, arg, call);
       // From clz of minimum we can compute result maximum.
-      if (r.constant_p ())
+      if (r.constant_p () && !r.varying_p ())
 	{
 	  int newmaxi = prec - 1 - wi::floor_log2 (r.lower_bound ());
 	  // Argument is unsigned, so do nothing if it is [0, ...] range.
@@ -1003,14 +1003,23 @@ gimple_ranger::range_on_exit (irange &r, basic_block bb, tree name)
   gcc_checking_assert (bb != EXIT_BLOCK_PTR_FOR_FN (cfun));
   gcc_checking_assert (gimple_range_ssa_p (name));
 
-  gimple *s = last_stmt (bb);
-  // If there is no statement in the block and this isn't the entry
-  // block, go get the range_on_entry for this block.  For the entry
-  // block, a NULL stmt will return the global value for NAME.
-  if (!s && bb != ENTRY_BLOCK_PTR_FOR_FN (cfun))
-    range_on_entry (r, bb, name);
-  else
+  gimple *s = SSA_NAME_DEF_STMT (name);
+  basic_block def_bb = gimple_bb (s);
+  // If this is not the definition block, get the range on the last stmt in
+  // the block... if there is one.
+  if (def_bb != bb)
+    s = last_stmt (bb);
+  // If there is no statement provided, get the range_on_entry for this block.
+  if (s)
     range_of_expr (r, name, s);
+  else
+    {
+      range_on_entry (r, bb, name);
+      // See if there was a deref in this block, if applicable
+      if (!cfun->can_throw_non_call_exceptions && r.varying_p () &&
+	  m_cache.m_non_null.non_null_deref_p (name, bb))
+	r = range_nonzero (TREE_TYPE (name));
+    }
   gcc_checking_assert (r.undefined_p ()
 		       || range_compatible_p (r.type (), TREE_TYPE (name)));
 }
@@ -1072,6 +1081,12 @@ gimple_ranger::range_of_stmt (irange &r, gimple *s, tree name)
   // can sometimes get different results.  See PR 97741.
   r.intersect (tmp);
   m_cache.set_global_range (name, r);
+
+  // Pointers which resolve to non-zero at the defintion point do not need
+  // tracking in the cache as they will never change.  See PR 98866.
+  if (POINTER_TYPE_P (TREE_TYPE (name)) && r.nonzero_p ())
+    m_cache.set_range_invariant (name);
+
   return true;
 }
 

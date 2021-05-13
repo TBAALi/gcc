@@ -1,5 +1,5 @@
 /* Subroutines used by or related to instruction recognition.
-   Copyright (C) 1987-2020 Free Software Foundation, Inc.
+   Copyright (C) 1987-2021 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -2267,6 +2267,7 @@ asm_operand_ok (rtx op, const char *constraint, const char **constraints)
 	      break;
 
 	    case CT_MEMORY:
+	    case CT_RELAXED_MEMORY:
 	      mem = op;
 	      /* Fall through.  */
 	    case CT_SPECIAL_MEMORY:
@@ -2892,6 +2893,7 @@ preprocess_constraints (int n_operands, int n_alternatives,
 
 		    case CT_MEMORY:
 		    case CT_SPECIAL_MEMORY:
+		    case CT_RELAXED_MEMORY:
 		      op_alt[i].memory_ok = 1;
 		      break;
 
@@ -3022,10 +3024,7 @@ constrain_operands (int strict, alternative_mask alternatives)
     return 1;
 
   for (c = 0; c < recog_data.n_operands; c++)
-    {
-      constraints[c] = recog_data.constraints[c];
-      matching_operands[c] = -1;
-    }
+    constraints[c] = recog_data.constraints[c];
 
   do
     {
@@ -3044,6 +3043,9 @@ constrain_operands (int strict, alternative_mask alternatives)
 	  which_alternative++;
 	  continue;
 	}
+
+      for (opno = 0; opno < recog_data.n_operands; opno++)
+	matching_operands[opno] = -1;
 
       for (opno = 0; opno < recog_data.n_operands; opno++)
 	{
@@ -4532,8 +4534,13 @@ pass_split_before_regstack::gate (function *)
   /* If flow2 creates new instructions which need splitting
      and scheduling after reload is not done, they might not be
      split until final which doesn't allow splitting
-     if HAVE_ATTR_length.  */
+     if HAVE_ATTR_length.  Selective scheduling can result in
+     further instructions that need splitting.  */
+#ifdef INSN_SCHEDULING
+  return !enable_split_before_sched2 () || flag_selective_scheduling2;
+#else
   return !enable_split_before_sched2 ();
+#endif
 #else
   return false;
 #endif

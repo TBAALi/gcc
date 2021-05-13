@@ -1,5 +1,5 @@
 /* Routines for manipulation of expression nodes.
-   Copyright (C) 2000-2020 Free Software Foundation, Inc.
+   Copyright (C) 2000-2021 Free Software Foundation, Inc.
    Contributed by Andy Vaught
 
 This file is part of GCC.
@@ -5854,6 +5854,8 @@ gfc_is_simply_contiguous (gfc_expr *expr, bool strict, bool permit_element)
 	part_ref  = ref;
       else if (ref->type == REF_SUBSTRING)
 	return false;
+      else if (ref->type == REF_INQUIRY)
+	return false;
       else if (ref->u.ar.type != AR_ELEMENT)
 	ar = &ref->u.ar;
     }
@@ -6119,7 +6121,9 @@ gfc_check_vardef_context (gfc_expr* e, bool pointer, bool alloc_obj,
     }
   if (!pointer && sym->attr.flavor != FL_VARIABLE
       && !(sym->attr.flavor == FL_PROCEDURE && sym == sym->result)
-      && !(sym->attr.flavor == FL_PROCEDURE && sym->attr.proc_pointer))
+      && !(sym->attr.flavor == FL_PROCEDURE && sym->attr.proc_pointer)
+      && !(sym->attr.flavor == FL_PROCEDURE
+	   && sym->attr.function && sym->attr.pointer))
     {
       if (context)
 	gfc_error ("%qs in variable definition context (%s) at %L is not"
@@ -6243,6 +6247,9 @@ gfc_check_vardef_context (gfc_expr* e, bool pointer, bool alloc_obj,
 
   /* Variable not assignable from a PURE procedure but appears in
      variable definition context.  */
+  own_scope = own_scope
+	      || (sym->attr.result && sym->ns->proc_name
+		  && sym == sym->ns->proc_name->result);
   if (!pointer && !own_scope && gfc_pure (NULL) && gfc_impure_variable (sym))
     {
       if (context)

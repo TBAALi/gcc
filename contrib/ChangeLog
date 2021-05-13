@@ -1,3 +1,191 @@
+2021-05-12  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Simplify needle lookup.
+	* gcc-changelog/git_update_version.py: Pass ref_name to
+	parse_git_revisions.
+
+2021-05-11  Martin Liska  <mliska@suse.cz>
+
+	* gcc_update: Remove libhsail-rt folder.
+	* update-copyright.py: Likewise.
+
+2021-05-11  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_check_commit.py: Remove --non-strict-mode.
+	* gcc-changelog/git_commit.py: Remove strict mode.
+	* gcc-changelog/git_email.py: Likewise.
+	* gcc-changelog/git_repository.py: Likewise.
+	* gcc-changelog/test_email.py: Likewise.
+	* gcc-changelog/test_patches.txt: Update patches so that they
+	don't contain a ChangeLog file changes.
+
+2021-05-11  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Remove ChangeLog locations
+	based on ref_name.
+	* gcc-changelog/git_repository.py: Likewise.
+
+2021-05-10  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_email.py: Remove newlines when --help
+	is used.
+
+2021-05-10  Tobias Burnus  <tobias@codesourcery.com>
+
+	* gcc-changelog/git_check_commit.py (__Main__): State in --help
+	the default value for 'revisions'.
+	* gcc-changelog/git_email.py (show_help): Add.
+	(__main__): Handle -h and --help.
+
+2021-05-10  Tobias Burnus  <tobias@codesourcery.com>
+
+	* gcc-changelog/git_commit.py (Error.__repr__): Add space after the colon.
+	(GitCommit.check_mentioned_files): Check whether the same file has been
+	specified multiple times.
+	* gcc-changelog/test_email.py (TestGccChangelog.test_multi_same_file): New.
+	* gcc-changelog/test_patches.txt (0001-OpenMP-Fix-SIMT): New test.
+
+2021-05-10  Martin Liska  <mliska@suse.cz>
+
+	Revert:
+	2021-05-10  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Remove components that will be
+	removed.
+
+2021-05-10  Martin Liska  <mliska@suse.cz>
+
+	* gcc_update: Start using reload.c instead of version.c.
+
+2021-05-10  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Remove components that will be
+	removed.
+
+2021-04-27  Jakub Jelinek  <jakub@redhat.com>
+
+	* gennews (files): Add files for GCC 10 and GCC 11.
+
+2021-04-22  David Edelsohn  <dje.gcc@gmail.com>
+
+	* config-list.mk: Remove rs6000-ibm-aix6.1.
+	Rename rs6000-ibm-aix7.1 to powerpc-ibm-aix7.1.
+	Add powerpc-ibm-aix7.2.
+
+2021-04-20  Jakub Jelinek  <jakub@redhat.com>
+
+	* gcc-changelog/git_update_version.py (active_refs): Add
+	releases/gcc-11.
+
+2021-04-12  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Do not allow space in long lines.
+
+2021-04-12  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Support long filenames
+	in entries.
+	* gcc-changelog/test_email.py: Test it.
+	* gcc-changelog/test_patches.txt: Likewise.
+
+2021-03-23  Martin Liska  <mliska@suse.cz>
+
+	* mklog.py: Fix broken tests.
+
+2021-03-22  Martin Liska  <mliska@suse.cz>
+
+	* mklog.py: Add --directory argument.
+
+2021-03-19  Matthias Klose  <doko@ubuntu.com>
+
+	* texi2pod.pl: Substitute @tie{} with a space for the man pages.
+
+2021-03-16  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_update_version.py: Skip one problematic
+	commit.
+
+2021-03-12  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Allow deletion of ChangeLog
+	files.
+	* gcc-changelog/setup.cfg: Set line limit to 120 characters.
+	* gcc-changelog/test_email.py: Add test.
+	* gcc-changelog/test_patches.txt: Likewise.
+	* gcc-changelog/git_email.py: Fix parsing of deleted files.
+
+2021-02-08  Mike Frysinger  <vapier@gentoo.org>
+
+	* mklog.py (generated_files): New set.
+	(generate_changelog): Add entries based on generated_files.
+
+2021-02-03  Aaron Sawdey  <acsawdey@linux.ibm.com>
+
+	* gcc_update (files_and_dependencies): Add dependency for
+	gcc/config/rs6000/fusion.md on gcc/config/rs6000/genfusion.md.
+
+2021-01-28  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR lto/85574
+	* compare-lto: Deal with PE-COFF executables specifically.
+
+2021-01-14  Martin Liska  <mliska@suse.cz>
+
+	* mklog.py: Fix infinite loop for unsupported files.
+
+2021-01-13  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Support wrapping of functions
+	in parentheses that can take multiple lines.
+	* gcc-changelog/test_email.py: Add tests for it.
+	* gcc-changelog/test_patches.txt: Add 2 patches.
+
+2021-01-13  Martin Liska  <mliska@suse.cz>
+
+	* mklog.py: Parse also define_insn_and_split and similar
+	directives in .md files.
+	* test_mklog.py: Test.
+
+2021-01-13  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Allow modifications of older
+	ChangeLog (or specific) files without need to make a ChangeLog
+	entry.
+	* gcc-changelog/test_email.py: Test it.
+	* gcc-changelog/test_patches.txt: Add new patch.
+
+2021-01-11  Martin Liska  <mliska@suse.cz>
+
+	* update-copyright.py: Port to python3 by guessing encoding
+	(first utf8, then iso8859). Add 2 more ignores: .png and .pyc.
+
+2021-01-06  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Add decode_path function.
+	* gcc-changelog/git_email.py: Use it in order to solve
+	utf8 encoding filename issues.
+	* gcc-changelog/git_repository.py: Likewise.
+	* gcc-changelog/test_email.py: Test it.
+
+2021-01-04  Jakub Jelinek  <jakub@redhat.com>
+
+	* update-copyright.py: Add AMD and Ulf Adams as external authors.
+
+2021-01-04  Jakub Jelinek  <jakub@redhat.com>
+
+	* update-copyright.py: Use 8 spaces instead of tab to indent.
+
+2021-01-04  Martin Liska  <mliska@suse.cz>
+
+	* mklog.py: Add --update-copyright option which adds:
+	"Update copyright years." to ChangeLog files belonging
+	to a modified file.
+
+2021-01-04  Martin Liska  <mliska@suse.cz>
+
+	* gcc-changelog/git_commit.py: Skip Update copyright
+	years commits.
+
 2020-12-21  Martin Liska  <mliska@suse.cz>
 
 	* gcc-changelog/git_commit.py: Add new error for quoted

@@ -1,3 +1,193 @@
+2021-05-10  Martin Liska  <mliska@suse.cz>
+
+	* libgcov-driver.c (gcov_version): Use different name that does
+	not clash with newly introduced macro.
+
+2021-04-29  Eric Botcazou  <ebotcazou@adacore.com>
+
+	* libgcov.h: For the target, define GCOV_LOCKED_WITH_LOCKING
+	if __MSVCRT__ and, for the host, define it if HOST_HAS_LK_LOCK.
+	* libgcov-driver.c: Add directives if GCOV_LOCKED_WITH_LOCKING.
+
+2021-04-28  Patrick McGehearty  <patrick.mcgehearty@oracle.com>
+
+	* libgcc2.c (XMTYPE, XCTYPE, RBIG, RMIN, RMIN2, RMINSCAL, RMAX2):
+	Define.
+	(__divsc3, __divdc3, __divxc3, __divtc3): Improve complex divide.
+	* config/rs6000/_divkc3.c (RBIG, RMIN, RMIN2, RMINSCAL, RMAX2):
+	Define.
+	(__divkc3): Improve complex divide.
+
+2021-04-23  Michael Meissner  <meissner@linux.ibm.com>
+
+	PR target/98952
+	* config/rs6000/tramp.S (__trampoline_setup, elfv1 #ifdef): Fix
+	trampoline size comparison in 32-bit by reversing test and
+	combining load immediate with compare.
+	(__trampoline_setup, elfv2 #ifdef): Fix trampoline size comparison
+	in 32-bit by reversing test and combining load immediate with
+	compare.
+
+2021-04-05  Florian Weimer  <fweimer@redhat.com>
+	    Michael Meissner   <meissner@linux.ibm.com>
+
+	* config/rs6000/t-float128 (fp128_ppc_funcs): Add decimal floating
+	point functions for $(decimal_float) only.
+
+2021-04-03  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/97653
+	* config/rs6000/t-linux (IBM128_STATIC_OBJS): Fix spelling, use
+	$(objext) instead of $(object).  Use _floatunditf instead of
+	_floatunsditf.  Add tf <-> ti conversion objects.
+	(IBM128_SHARED_OBJS): Use proper substitution reference syntax.
+
+2021-03-29  Michael Meissner  <meissner@linux.ibm.com>
+
+	* config/rs6000/t-float128 (fp128_decstr_funcs): Delete.
+	(fp128_ppc_funcs): Do not add $(fp128_decstr_funcs).
+	(fp128_decstr_objs): Delete.
+	* dfp-bit.h: Call __sprintfieee128 to do conversions from
+	_Float128 to a Decimal type.  Call __strtoieee128 to do
+	conversions from a Decimal type to _Float128.
+	* config/rs6000/_sprintfkf.c: Delete file.
+	* config/rs6000/_sprintfkf.h: Delete file.
+	* config/rs6000/_strtokf.c: Delete file.
+	* config/rs6000/_strtokf.h: Delete file.
+
+2021-03-23  Marcus Comstedt  <marcus@mc.pp.se>
+
+	* config/riscv/sfp-machine.h (__BYTE_ORDER): Set according
+	to __BYTE_ORDER__.
+
+2021-03-06  Jakub Jelinek  <jakub@redhat.com>
+
+	PR gcov-profile/99406
+	* libgcov.h (MAP_FAILED, MAP_ANONYMOUS): If HAVE_SYS_MMAN_H is
+	defined, define these macros if not defined already.
+
+2021-03-04  Martin Liska  <mliska@suse.cz>
+
+	PR gcov-profile/99105
+	* libgcov-driver.c (write_top_counters): Rename to ...
+	(write_topn_counters): ... this.
+	(write_one_data): Pre-allocate buffer for number of items
+	in the corresponding linked lists.
+	* libgcov.h (malloc_mmap): New function.
+	(allocate_gcov_kvp): Use it.
+
+2021-03-04  Martin Liska  <mliska@suse.cz>
+
+	PR gcov-profile/99385
+	* libgcov.h (allocate_gcov_kvp): Call mmap with fd equal to -1.
+
+2021-03-03  Martin Liska  <mliska@suse.cz>
+
+	PR gcov-profile/97461
+	* config.in: Regenerate.
+	* configure: Likewise.
+	* configure.ac: Check sys/mman.h header file
+	* libgcov-driver.c (struct gcov_kvp): Remove static
+	pre-allocated pool and use a dynamic one.
+	* libgcov.h (MMAP_CHUNK_SIZE): New.
+	(gcov_counter_add): Use mmap to allocate pool for struct
+	gcov_kvp.
+
+2021-03-02  Michael Meissner  <meissner@linux.ibm.com>
+
+	* config/rs6000/_sprintfkf.h (__sprintfkf): Fix prototype to match
+	the function.
+	* config/rs6000/_sprintfkf.c: Include _sprintfkf.h.
+
+2021-02-24  Jakub Jelinek  <jakub@redhat.com>
+
+	PR libgcc/99236
+	* libgcc2.c (__powisf2, __powidf2, __powitf2, __powixf2): Perform
+	negation of m in unsigned type.
+
+2021-02-24  Christophe Lyon  <christophe.lyon@linaro.org>
+	    Hau Hsu  <hsuhau617@gmail.com>
+
+	PR target/99157
+	* config/arm/t-arm: Fix cmse support detection.
+
+2021-02-22  Michael Meissner  <meissner@linux.ibm.com>
+
+	* dfp-bit.c (BFP_TO_DFP): Fix a comment line that was too long.
+
+2021-02-22  Michael Meissner  <meissner@linux.ibm.com>
+
+	* config/rs6000/_dd_to_kf.c: New file.
+	* config/rs6000/_kf_to_dd.c: New file.
+	* config/rs6000/_kf_to_sd.c: New file.
+	* config/rs6000/_kf_to_td.c: New file.
+	* config/rs6000/_sd_to_kf.c: New file.
+	* config/rs6000/_sprintfkf.c: New file.
+	* config/rs6000/_sprintfkf.h: New file.
+	* config/rs6000/_strtokf.h: New file.
+	* config/rs6000/_strtokf.c: New file.
+	* config/rs6000/_td_to_kf.c: New file.
+	* config/rs6000/quad-float128.h: Add new declarations.
+	* config/rs6000/t-float128 (fp128_dec_funcs): New macro.
+	(fp128_decstr_funcs): New macro.
+	(ibm128_dec_funcs): New macro.
+	(fp128_ppc_funcs): Add the new conversions.
+	(fp128_dec_objs): Force Decimal <-> __float128 conversions to be
+	compiled with -mabi=ieeelongdouble.
+	(fp128_decstr_objs): Force __float128 <-> string conversions to be
+	compiled with -mabi=ibmlongdouble.
+	(ibm128_dec_objs): Force Decimal <-> __float128 conversions to be
+	compiled with -mabi=ieeelongdouble.
+	(FP128_CFLAGS_DECIMAL): New macro.
+	(IBM128_CFLAGS_DECIMAL): New macro.
+	* dfp-bit.c (DFP_TO_BFP): Add PowerPC _Float128 support.
+	(BFP_TO_DFP): Add PowerPC _Float128 support.
+	* dfp-bit.h (BFP_KIND): Add new binary floating point kind for
+	IEEE 128-bit floating point.
+	(DFP_TO_BFP): Add PowerPC _Float128 support.
+	(BFP_TO_DFP): Add PowerPC _Float128 support.
+	(BFP_SPRINTF): New macro.
+
+2021-01-27  Jakub Jelinek  <jakub@redhat.com>
+
+	* config/i386/savms64.h: Add .note.GNU-stack section on Linux.
+	* config/i386/savms64f.h: Likewise.
+	* config/i386/resms64.h: Likewise.
+	* config/i386/resms64f.h: Likewise.
+	* config/i386/resms64x.h: Likewise.
+	* config/i386/resms64fx.h: Likewise.
+
+2021-01-26  Martin Liska  <mliska@suse.cz>
+
+	PR gcov-profile/98739
+	* libgcov.h (gcov_topn_add_value): Do not train when
+	we have a merged profile with a negative number of total
+	value.
+
+2021-01-25  Martin Liska  <mliska@suse.cz>
+
+	PR gcov-profile/98739
+	* libgcov-merge.c (__gcov_merge_topn): Mark when merging
+	ends with a dropped counter.
+	* libgcov.h (gcov_topn_add_value): Add return value.
+
+2021-01-13  Stafford Horne  <shorne@gmail.com>
+
+	* config/or1k/sfp-machine.h (FP_RND_NEAREST, FP_RND_ZERO,
+	FP_RND_PINF, FP_RND_MINF, FP_RND_MASK, FP_EX_OVERFLOW,
+	FP_EX_UNDERFLOW, FP_EX_INEXACT, FP_EX_INVALID, FP_EX_DIVZERO,
+	FP_EX_ALL): New constant macros.
+	(_FP_DECL_EX, FP_ROUNDMODE, FP_INIT_ROUNDMODE,
+	FP_HANDLE_EXCEPTIONS): New macros.
+	(_FP_TININESS_AFTER_ROUNDING): Change to 1.
+
+2021-01-13  Samuel Thibault  <samuel.thibault@gnu.org>
+
+	* config/i386/gnu-unwind.h (x86_gnu_fallback_frame_state): Add the
+	posix siginfo case to struct handler_args. Detect between legacy
+	and siginfo from the second parameter, which is a small sigcode in
+	the legacy case, and a pointer in the siginfo case.
+
 2020-12-20  Max Filippov  <jcmvbkbc@gmail.com>
 
 	* config/xtensa/lib1funcs.S (__bswapsi2, __bswapdi2): New
@@ -11265,7 +11455,7 @@
 	shared-object.mk, siditi-object.mk, static-object.mk: New files.
 	* configure: Generated.
 
-Copyright (C) 2007-2020 Free Software Foundation, Inc.
+Copyright (C) 2007-2021 Free Software Foundation, Inc.
 
 Copying and distribution of this file, with or without modification,
 are permitted in any medium without royalty provided the copyright
